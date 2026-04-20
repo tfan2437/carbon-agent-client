@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ForceGraph2D, { ForceGraphMethods, NodeObject, LinkObject } from 'react-force-graph-2d';
-import { GHGNode, GHGLink, GHG_DATA, getNodeColor, NODE_TYPE_LABELS, calculateScopeEmissions, getFacilities, NodeType, Scope } from '@/lib/ghg-data';
+import { GHGNode, GHG_DATA, getNodeColor, NODE_TYPE_LABELS, calculateScopeEmissions, getFacilities, NodeType, Scope } from '@/lib/ghg-data';
 
 // Extended types for force graph
 interface GraphNode extends NodeObject {
@@ -53,12 +53,12 @@ function getNodeSize(node: GraphNode, maxEmissions: number): number {
 }
 
 export default function GHGGraph() {
-  const fgRef = useRef<ForceGraphMethods | null>(null);
+  const fgRef = useRef<ForceGraphMethods<GraphNode, GraphLink> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
+  const zoomRef = useRef(1);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
-  const [zoom, setZoom] = useState(1);
   const [filterPanelOpen, setFilterPanelOpen] = useState(true);
 
   // Filters
@@ -103,7 +103,6 @@ export default function GHGGraph() {
 
     // Filter by facilities
     if (selectedFacilities.length > 0) {
-      const facilityIds = new Set(selectedFacilities);
       const relevantNodeIds = new Set<string>();
 
       // Add company
@@ -317,7 +316,7 @@ export default function GHGGraph() {
         onNodeHover={(node) => setHoveredNode(node as GraphNode | null)}
         onNodeClick={(node) => setSelectedNode(node as GraphNode)}
         onBackgroundClick={() => setSelectedNode(null)}
-        onZoom={({ k }) => setZoom(k)}
+        onZoom={({ k }) => { zoomRef.current = k; }}
         d3AlphaDecay={0.02}
         d3VelocityDecay={0.3}
         warmupTicks={100}
@@ -608,7 +607,7 @@ export default function GHGGraph() {
       <div className="absolute bottom-4 right-4 z-40">
         <div className="bg-[#1a1d24]/80 backdrop-blur-md border border-white/10 rounded-xl overflow-hidden flex flex-col">
           <button
-            onClick={() => fgRef.current?.zoom(zoom * 1.5, 300)}
+            onClick={() => fgRef.current?.zoom(zoomRef.current * 1.5, 300)}
             className="px-4 py-3 text-white hover:bg-white/10 transition-colors border-b border-white/10"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -616,7 +615,7 @@ export default function GHGGraph() {
             </svg>
           </button>
           <button
-            onClick={() => fgRef.current?.zoom(zoom / 1.5, 300)}
+            onClick={() => fgRef.current?.zoom(zoomRef.current / 1.5, 300)}
             className="px-4 py-3 text-white hover:bg-white/10 transition-colors border-b border-white/10"
           >
             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
