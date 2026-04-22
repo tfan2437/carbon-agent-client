@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react';
 import { ActivityDataNode, GHGGraphData } from '@/lib/types';
+import { usePii } from '../pii-context';
 
 interface Props {
   activity: ActivityDataNode;
@@ -42,9 +43,18 @@ const SEGMENT_LABELS: Record<string, string> = {
 };
 
 export function DetailElectricity({ activity, graph }: Props) {
+  const { unlocked, unmasked } = usePii();
+  const showRaw = unlocked && unmasked;
   const summary = activity.extraction_summary as ElectricitySummary;
   const total = Number(summary?.total_consumption_kwh ?? activity.activity_value ?? 0);
   const amount = Number(summary?.total_amount_twd ?? 0);
+
+  const maskCustomerNumber = (n: string | undefined): string => {
+    if (!n) return '—';
+    if (showRaw) return n;
+    if (n.length <= 6) return n;
+    return `${n.slice(0, 4)}…${n.slice(-2)}`;
+  };
 
   const segments = useMemo(() => {
     const seg = summary?.segments ?? {};
@@ -84,6 +94,13 @@ export function DetailElectricity({ activity, graph }: Props) {
         />
       </section>
 
+      {summary?.extraction_confidence != null && (
+        <section className="px-5 py-3 border-b border-white/5 flex items-center justify-between">
+          <span className="text-[10px] uppercase tracking-wider text-gray-500">抽取信心度</span>
+          <ConfidenceBadge value={summary.extraction_confidence} />
+        </section>
+      )}
+
       {segments.length > 0 && (
         <section className="px-5 py-4 border-b border-white/5">
           <h3 className="text-[11px] uppercase tracking-wider text-gray-500 mb-3">時段使用</h3>
@@ -114,11 +131,8 @@ export function DetailElectricity({ activity, graph }: Props) {
       <section className="px-5 py-4 border-b border-white/5">
         <h3 className="text-[11px] uppercase tracking-wider text-gray-500 mb-2">用電戶資訊</h3>
         <div className="space-y-1.5 text-sm">
-          <Field label="電號" value={summary?.customer_number ?? '—'} mono />
+          <Field label="電號" value={maskCustomerNumber(summary?.customer_number)} mono />
           <Field label="用電地址" value={summary?.service_address ?? '—'} />
-          {summary?.extraction_confidence != null && (
-            <Field label="抽取信心度" value={`${(summary.extraction_confidence * 100).toFixed(2)}%`} />
-          )}
         </div>
       </section>
 
@@ -172,5 +186,23 @@ function Field({ label, value, mono }: { label: string; value: string; mono?: bo
       <span className="text-xs text-gray-500">{label}</span>
       <span className={`text-xs text-gray-200 text-right ${mono ? 'font-mono' : ''}`}>{value}</span>
     </div>
+  );
+}
+
+function ConfidenceBadge({ value }: { value: number }) {
+  const pct = value * 100;
+  const tier =
+    pct >= 95
+      ? { color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', label: '高' }
+      : pct >= 80
+        ? { color: 'bg-amber-500/15 text-amber-400 border-amber-500/30', label: '中' }
+        : { color: 'bg-rose-500/15 text-rose-400 border-rose-500/30', label: '低' };
+  return (
+    <span
+      className={`text-xs px-2 py-0.5 rounded border tabular-nums font-medium ${tier.color}`}
+      title="由 OCR / 規則 推算的萃取準確度"
+    >
+      {tier.label} · {pct.toFixed(2)}%
+    </span>
   );
 }

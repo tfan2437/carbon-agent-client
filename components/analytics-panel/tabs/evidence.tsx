@@ -136,6 +136,11 @@ export function EvidenceTab({ graph, node, activity }: Props) {
         </section>
       )}
 
+      {/* Phase 4: Forensic cards — only when an activity is drilled in */}
+      {activity && <FactorCard activity={activity} />}
+      {activity && <GasMiniTable activity={activity} />}
+      {activity && <ExtractionConfidenceCard activity={activity} />}
+
       {/* Sibling activity nodes (when one file produced multiple records, e.g., refrigerant per equipment or cross-year electricity) */}
       {subject.siblings.length > 0 && (
         <section className="px-5 py-4 border-b border-white/5">
@@ -212,4 +217,113 @@ function formatDuration(ms: number | null): string | null {
   if (ms == null) return null;
   if (ms < 1000) return `${ms.toFixed(0)} ms`;
   return `${(ms / 1000).toFixed(2)} s`;
+}
+
+// ─── Phase 4 forensic cards ─────────────────────────────────────────
+
+const GAS_COLOR: Record<string, string> = {
+  CO2: '#A3A3A3',
+  CH4: '#10B981',
+  N2O: '#F59E0B',
+  HFCs: '#3B82F6',
+  PFCs: '#8B5CF6',
+  SF6: '#EC4899',
+  NF3: '#F97316',
+};
+
+function FactorCard({ activity }: { activity: ActivityDataNode }) {
+  const f = activity.emission_factor;
+  if (!f) return null;
+  return (
+    <section className="px-5 py-4 border-b border-white/5">
+      <h3 className="text-[11px] uppercase tracking-wider text-gray-500 mb-2">排放係數</h3>
+      <Field label="係數" value={`${f.value} ${f.unit}`} />
+      <Field label="出處" value={<span className="text-[11px]">{f.source}</span>} />
+      <Field label="係數年度" value={String(f.year)} />
+    </section>
+  );
+}
+
+function GasMiniTable({ activity }: { activity: ActivityDataNode }) {
+  const gases = activity.gas_breakdown ?? [];
+  if (gases.length === 0) return null;
+  return (
+    <section className="px-5 py-4 border-b border-white/5">
+      <h3 className="text-[11px] uppercase tracking-wider text-gray-500 mb-2">氣體拆解</h3>
+      <table className="w-full text-[11px]">
+        <thead className="border-b border-white/5">
+          <tr>
+            <th className="px-1 py-1 text-left text-[10px] uppercase tracking-wider text-gray-500">氣體</th>
+            <th className="px-1 py-1 text-right text-[10px] uppercase tracking-wider text-gray-500">係數</th>
+            <th className="px-1 py-1 text-right text-[10px] uppercase tracking-wider text-gray-500">GWP</th>
+            <th className="px-1 py-1 text-right text-[10px] uppercase tracking-wider text-gray-500">kg</th>
+            <th className="px-1 py-1 text-right text-[10px] uppercase tracking-wider text-gray-500">tCO₂e</th>
+          </tr>
+        </thead>
+        <tbody>
+          {gases.map((g) => (
+            <tr key={g.gas} className="border-b border-white/5">
+              <td className="px-1 py-1">
+                <span
+                  className="text-[10px] px-1.5 py-0.5 rounded font-medium"
+                  style={{
+                    backgroundColor: `${GAS_COLOR[g.gas] ?? '#6B7280'}25`,
+                    color: GAS_COLOR[g.gas] ?? '#9CA3AF',
+                  }}
+                >
+                  {g.gas}
+                </span>
+              </td>
+              <td className="px-1 py-1 text-right text-gray-400 tabular-nums">{g.factor_per_unit}</td>
+              <td className="px-1 py-1 text-right text-gray-400 tabular-nums">{g.gwp}</td>
+              <td className="px-1 py-1 text-right text-gray-300 tabular-nums">
+                {g.emission_kg.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+              </td>
+              <td className="px-1 py-1 text-right text-gray-200 tabular-nums">
+                {g.emission_tco2e.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+function ExtractionConfidenceCard({ activity }: { activity: ActivityDataNode }) {
+  const s = activity.extraction_summary as Record<string, unknown> | null;
+  const conf = s && typeof s.extraction_confidence === 'number' ? s.extraction_confidence : null;
+  if (conf == null) return null;
+  const pct = conf * 100;
+  const tier =
+    pct >= 95
+      ? { color: 'bg-emerald-500/15 text-emerald-400 border-emerald-500/30', label: '高' }
+      : pct >= 80
+        ? { color: 'bg-amber-500/15 text-amber-400 border-amber-500/30', label: '中' }
+        : { color: 'bg-rose-500/15 text-rose-400 border-rose-500/30', label: '低' };
+  return (
+    <section className="px-5 py-4 border-b border-white/5">
+      <h3 className="text-[11px] uppercase tracking-wider text-gray-500 mb-2">萃取信心</h3>
+      <div className="flex items-baseline justify-between">
+        <span className={`text-2xl font-light tabular-nums ${tier.color.split(' ')[1]}`}>
+          {pct.toFixed(2)}%
+        </span>
+        <span
+          className={`text-xs px-2 py-0.5 rounded border font-medium ${tier.color}`}
+          title="由 OCR / 規則 推算的萃取準確度"
+        >
+          {tier.label}
+        </span>
+      </div>
+    </section>
+  );
+}
+
+function Field({ label, value }: { label: string; value: React.ReactNode }) {
+  return (
+    <div className="flex justify-between items-baseline gap-3 py-1">
+      <span className="text-xs text-gray-500 whitespace-nowrap">{label}</span>
+      <span className="text-sm text-gray-200 text-right">{value}</span>
+    </div>
+  );
 }

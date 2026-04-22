@@ -1,11 +1,12 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import {
   ActivityDataNode,
   EMISSION_TYPE_LABELS,
   GHGGraphData,
   GHGNode,
+  ProcessingStatus,
 } from '@/lib/types';
 import { activitiesUnderFacility, activitiesUnderSource } from '@/lib/aggregations';
 
@@ -248,6 +249,53 @@ function ActivityOverview({ activity, graph }: { activity: ActivityDataNode; gra
         <Field label="出處" value={<span className="text-[11px]">{activity.emission_factor.source}</span>} />
         <Field label="係數年度" value={activity.emission_factor.year} />
       </Card>
+
+      {/* Phase 2: File metadata */}
+      <Card title="檔案資訊">
+        <Field
+          label="來源檔案"
+          value={
+            <span className="font-mono text-[11px] truncate max-w-[280px] inline-block" title={activity.source_file}>
+              {activity.source_file}
+            </span>
+          }
+        />
+        {activity.file_hash && (
+          <Field label="檔案雜湊" value={<CopyableHash value={activity.file_hash} />} />
+        )}
+        {activity.file_processing_time_ms != null && (
+          <Field label="處理耗時" value={formatDuration(activity.file_processing_time_ms) ?? '—'} />
+        )}
+        <Field label="處理狀態" value={<StatusBadge status={activity.status} />} />
+      </Card>
+
+      {/* Phase 2: Gas summary */}
+      {activity.gas_breakdown && activity.gas_breakdown.length > 0 && (
+        <Card title="氣體摘要">
+          <div className="flex flex-wrap gap-1.5">
+            {activity.gas_breakdown.map((g) => (
+              <span
+                key={g.gas}
+                className="text-[10px] px-2 py-0.5 rounded font-mono"
+                style={{
+                  backgroundColor: `${GAS_COLOR[g.gas] ?? '#6B7280'}25`,
+                  color: GAS_COLOR[g.gas] ?? '#9CA3AF',
+                }}
+                title={`${g.gas}: ${g.factor_per_unit} · GWP ${g.gwp} · ${g.emission_tco2e.toLocaleString(undefined, { maximumFractionDigits: 4 })} tCO₂e`}
+              >
+                {g.gas} · {g.emission_tco2e.toLocaleString(undefined, { maximumFractionDigits: 4 })} tCO₂e
+              </span>
+            ))}
+          </div>
+          <p className="text-[10px] text-gray-600 mt-2">
+            完整 7 氣體拆解請見「氣體」分頁。
+          </p>
+        </Card>
+      )}
+
+      {/* Phase 2: Extraction summary (source-type-specific) */}
+      <ExtractionSummaryCard activity={activity} />
+
       {siblings.length > 0 && (
         <Card title="跨年度">
           <div className="text-xs text-gray-400 mb-2">
@@ -270,5 +318,157 @@ function ActivityOverview({ activity, graph }: { activity: ActivityDataNode; gra
         </Card>
       )}
     </>
+  );
+}
+
+// ─── Phase 2 helpers ────────────────────────────────────────────────
+
+const GAS_COLOR: Record<string, string> = {
+  CO2: '#A3A3A3',
+  CH4: '#10B981',
+  N2O: '#F59E0B',
+  HFCs: '#3B82F6',
+  PFCs: '#8B5CF6',
+  SF6: '#EC4899',
+  NF3: '#F97316',
+};
+
+const STATUS_BADGE: Record<ProcessingStatus, { bg: string; fg: string; label: string }> = {
+  success: { bg: 'bg-emerald-500/15', fg: 'text-emerald-400', label: '成功' },
+  partial: { bg: 'bg-amber-500/15', fg: 'text-amber-400', label: '部分' },
+  failed: { bg: 'bg-rose-500/15', fg: 'text-rose-400', label: '失敗' },
+  duplicate: { bg: 'bg-gray-500/15', fg: 'text-gray-400', label: '重複' },
+};
+
+function StatusBadge({ status }: { status: ProcessingStatus }) {
+  const s = STATUS_BADGE[status];
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${s.bg} ${s.fg}`}>{s.label}</span>
+  );
+}
+
+function CopyableHash({ value }: { value: string }) {
+  const [copied, setCopied] = useState(false);
+  const truncated = value.length > 14 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
+  const onCopy = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // clipboard unavailable
+    }
+  };
+  return (
+    <button
+      onClick={onCopy}
+      className="font-mono text-[10px] text-gray-300 hover:text-white bg-white/5 hover:bg-white/10 rounded px-1.5 py-0.5"
+      title={value}
+    >
+      {copied ? '✓ 已複製' : truncated}
+    </button>
+  );
+}
+
+function formatDuration(ms: number | null): string | null {
+  if (ms == null) return null;
+  if (ms < 1000) return `${ms.toFixed(0)} ms`;
+  return `${(ms / 1000).toFixed(2)} s`;
+}
+
+function ExtractionSummaryCard({ activity }: { activity: ActivityDataNode }) {
+  const s = activity.extraction_summary as Record<string, unknown> | null;
+  if (!s || Object.keys(s).length === 0) return null;
+  const fields: Array<{ label: string; value: React.ReactNode }> = [];
+
+  switch (activity.source_type) {
+    case 'fuel': {
+      const fs = s as {
+        total_records?: number;
+        total_liters?: number;
+        equipment_count?: number;
+        fuel_type?: string;
+        supply_type?: string;
+      };
+      if (fs.total_records != null) fields.push({ label: '交易筆數', value: `${fs.total_records.toLocaleString()} 筆` });
+      if (fs.total_liters != null)
+        fields.push({ label: '總公升數', value: `${fs.total_liters.toLocaleString(undefined, { maximumFractionDigits: 1 })} L` });
+      if (fs.equipment_count != null) fields.push({ label: '車輛數', value: `${fs.equipment_count} 輛` });
+      if (fs.fuel_type) fields.push({ label: '燃料類型', value: fs.fuel_type });
+      if (fs.supply_type) fields.push({ label: '供應方式', value: fs.supply_type });
+      break;
+    }
+    case 'electricity': {
+      const es = s as {
+        customer_number?: string;
+        pricing_type?: string;
+        tou_type?: string | null;
+        total_amount_twd?: number;
+        extraction_confidence?: number;
+      };
+      if (es.customer_number) {
+        const masked = es.customer_number.length > 6
+          ? `${es.customer_number.slice(0, 4)}…${es.customer_number.slice(-2)}`
+          : es.customer_number;
+        fields.push({ label: '電號', value: <span className="font-mono text-[11px]">{masked}</span> });
+      }
+      if (es.pricing_type) fields.push({ label: '電價類型', value: es.pricing_type });
+      if (es.tou_type) fields.push({ label: '時段類型', value: es.tou_type });
+      if (es.total_amount_twd != null)
+        fields.push({ label: '總金額', value: `${es.total_amount_twd.toLocaleString()} TWD` });
+      if (es.extraction_confidence != null)
+        fields.push({ label: '抽取信心', value: <ConfidenceBadge value={es.extraction_confidence} /> });
+      break;
+    }
+    case 'refrigerant': {
+      const rs = s as {
+        supply_type?: string;
+        total_equipment_count?: number;
+        total_charge_kg?: number;
+      };
+      if (rs.supply_type) fields.push({ label: '設備類型', value: rs.supply_type });
+      if (rs.total_equipment_count != null) fields.push({ label: '設備數', value: `${rs.total_equipment_count} 台` });
+      if (rs.total_charge_kg != null)
+        fields.push({ label: '總充填量', value: `${rs.total_charge_kg.toFixed(3)} kg` });
+      break;
+    }
+    case 'work_hours': {
+      const ws = s as {
+        doc_type_code?: string;
+        employee_count?: number;
+        total_hours?: number;
+      };
+      if (ws.doc_type_code) fields.push({ label: '文件代碼', value: ws.doc_type_code });
+      if (ws.employee_count != null) fields.push({ label: '員工數', value: `${ws.employee_count} 人` });
+      if (ws.total_hours != null)
+        fields.push({ label: '總人時', value: `${ws.total_hours.toLocaleString(undefined, { maximumFractionDigits: 1 })} hr` });
+      break;
+    }
+  }
+
+  if (fields.length === 0) return null;
+
+  return (
+    <Card title="萃取摘要">
+      {fields.map((f, i) => (
+        <Field key={i} label={f.label} value={f.value} />
+      ))}
+    </Card>
+  );
+}
+
+function ConfidenceBadge({ value }: { value: number }) {
+  const pct = value * 100;
+  const color =
+    pct >= 95
+      ? 'bg-emerald-500/15 text-emerald-400'
+      : pct >= 80
+        ? 'bg-amber-500/15 text-amber-400'
+        : 'bg-rose-500/15 text-rose-400';
+  return (
+    <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium tabular-nums ${color}`}>
+      {pct.toFixed(1)}%
+    </span>
   );
 }

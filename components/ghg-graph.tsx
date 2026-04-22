@@ -294,7 +294,12 @@ export default function GHGGraph() {
     const size = getNodeSize(node, maxEmissions, topologyMode);
     const color = theme.colorFor(node as GHGNode);
     const highlighted = isHighlighted(node.id);
-    const isSelected = selectedNode?.id === node.id;
+    // Dual-selection: the parent ES is the breadcrumb anchor (selectedNode)
+    // and the activity is the drilled-in focus (selectedActivityId). Both
+    // get the same selection outline so the user sees the full drill path.
+    const isSelected =
+      selectedNode?.id === node.id ||
+      (selectedActivityId != null && selectedActivityId === node.id);
 
     // Opacity based on hover state
     const opacity = hoveredNode ? (highlighted ? 1 : 0.15) : 1;
@@ -317,7 +322,8 @@ export default function GHGGraph() {
     ctx.arc(node.x!, node.y!, size, 0, 2 * Math.PI);
     ctx.fill();
 
-    // Draw selection ring
+    // Selection ring — both the anchor ES and the drilled-in activity get the
+    // same solid white outline.
     if (isSelected) {
       ctx.strokeStyle = '#ffffff';
       ctx.lineWidth = 2 / globalScale;
@@ -338,7 +344,7 @@ export default function GHGGraph() {
     }
 
     ctx.globalAlpha = 1;
-  }, [maxEmissions, topologyMode, isHighlighted, hoveredNode, selectedNode, theme]);
+  }, [maxEmissions, topologyMode, isHighlighted, hoveredNode, selectedNode, selectedActivityId, theme]);
 
   // Custom link rendering
   const paintLink = useCallback((link: GraphLink, ctx: CanvasRenderingContext2D) => {
@@ -349,15 +355,24 @@ export default function GHGGraph() {
     const sourceHighlighted = isHighlighted(source.id);
     const targetHighlighted = isHighlighted(target.id);
     const highlighted = sourceHighlighted && targetHighlighted;
-    const opacity = hoveredNode ? (highlighted ? 0.4 : 0.05) : 0.25;
+    // The link that joins the selected ES anchor to its drilled-in activity
+    // gets emphasized so the drill path reads at a glance.
+    const isDrillEdge =
+      selectedActivityId != null &&
+      selectedNode != null &&
+      ((source.id === selectedNode.id && target.id === selectedActivityId) ||
+        (target.id === selectedNode.id && source.id === selectedActivityId));
+    const opacity = hoveredNode ? (highlighted ? 0.4 : 0.05) : isDrillEdge ? 0.9 : 0.25;
 
-    ctx.strokeStyle = `rgba(107, 114, 128, ${opacity})`;
+    ctx.strokeStyle = isDrillEdge
+      ? `rgba(255, 255, 255, ${opacity})`
+      : `rgba(107, 114, 128, ${opacity})`;
     ctx.lineWidth = 1;
     ctx.beginPath();
     ctx.moveTo(source.x, source.y);
     ctx.lineTo(target.x, target.y);
     ctx.stroke();
-  }, [isHighlighted, hoveredNode]);
+  }, [isHighlighted, hoveredNode, selectedNode, selectedActivityId]);
 
   // Focus on a specific node — used by analytics-panel "jump to facility" actions.
   const focusOnNode = useCallback((node: GraphNode) => {
@@ -414,7 +429,22 @@ export default function GHGGraph() {
         }}
         onNodeHover={(node) => setHoveredNode(node as GraphNode | null)}
         onNodeClick={(node) => {
-          setSelectedNode(node as GraphNode);
+          const n = node as GraphNode;
+          // Activity nodes (visible in 詳細 view) route through the same
+          // drilled-in flow as the records-table click: select the parent
+          // emission_source as the panel anchor and set the activity id so
+          // the panel renders its full tab set (概覽 / 明細 / 氣體 / 原始檔案).
+          if (n.type === 'activity_data') {
+            const parentEs = graph?.nodes.find(
+              (m) =>
+                m.type === 'emission_source' &&
+                m.id === `es-${n.facility_id}-${n.source_code}-${n.material_code}`,
+            );
+            setSelectedNode(parentEs ?? n);
+            setSelectedActivityId(n.id);
+            return;
+          }
+          setSelectedNode(n);
           setSelectedActivityId(null);
         }}
         onBackgroundClick={() => {
@@ -724,7 +754,7 @@ export default function GHGGraph() {
           <div className="flex items-center gap-4 text-xs">
             <span className="text-gray-500 text-[10px] uppercase tracking-wider">{theme.englishName}</span>
             {theme.legend.map((entry) => (
-              <div key={entry.label} className="flex items-center gap-2">
+              <div key={entry.label} className="flex items-center gap-2" title={entry.hint}>
                 <span
                   className="w-3 h-3 rounded-full"
                   style={{ backgroundColor: entry.color }}
