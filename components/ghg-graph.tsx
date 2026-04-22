@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ForceGraph2D, { ForceGraphMethods, NodeObject, LinkObject } from 'react-force-graph-2d';
-import { GHGGraphData, GHGNode, getNodeColor, NODE_TYPE_LABELS, Scope } from '@/lib/types';
+import { useSearchParams } from 'next/navigation';
+import {
+  EMISSION_TYPE_LABELS,
+  EmissionType,
+  GHGGraphData,
+  GHGNode,
+  NODE_TYPE_LABELS,
+  Scope,
+  SourceType,
+} from '@/lib/types';
+import { DEFAULT_THEME, THEMES, THEME_ORDER, ThemeKey } from '@/lib/themes';
+import AnalyticsPanel from '@/components/analytics-panel';
 
 // Force-graph augments nodes with x/y during simulation; intersect with the
 // discriminated union so per-type narrowing (activity_data etc.) still works.
@@ -18,12 +29,38 @@ interface GraphData {
   links: GraphLink[];
 }
 
+type TopologyMode = 'macro' | 'expanded';
+
+// Macro mode renders only the structural backbone — activity / source_document
+// nodes still live in `graph` and feed the analytics panel, but they are not
+// painted on the canvas. With ~349 records the expanded view is unreadable.
+const MACRO_TYPES: ReadonlySet<GHGNode['type']> = new Set([
+  'company',
+  'facility',
+  'emission_source',
+]);
+
+const ALL_SOURCE_TYPES: SourceType[] = ['fuel', 'electricity', 'refrigerant', 'work_hours'];
+const ALL_EMISSION_TYPES: EmissionType[] = [
+  'mobile_combustion',
+  'fugitive',
+  'purchased_electricity',
+  'process',
+];
+
+const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
+  fuel: '燃料 Fuel',
+  electricity: '電力 Electricity',
+  refrigerant: '冷媒 Refrigerant',
+  work_hours: '人時 Work Hours',
+};
+
 // source_document has no emissions field; everything else carries emissions_tco2e.
 function nodeEmissions(node: GHGNode): number {
   return 'emissions_tco2e' in node ? node.emissions_tco2e : 0;
 }
 
-// Format numbers for display. Values are tCO₂e, which span ~0.0005 to ~1115 in
+// Format numbers for display. Values are tCO₂e, which span ~0.0005 to ~57k in
 // current data, so we keep 4dp for sub-1 values instead of collapsing to "0".
 function formatNumber(num: number): string {
   if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
@@ -33,15 +70,17 @@ function formatNumber(num: number): string {
   return num.toFixed(0);
 }
 
-// Calculate node size based on emissions (log scale)
-function getNodeSize(node: GraphNode, maxEmissions: number): number {
+// Calculate node size based on emissions (log scale). Macro mode uses
+// a wider range since we have fewer nodes competing for screen real estate.
+function getNodeSize(node: GraphNode, maxEmissions: number, mode: TopologyMode): number {
   const emissions = nodeEmissions(node);
-  if (emissions === 0 || maxEmissions === 0) return 4;
-  const minSize = 4;
-  const maxSize = 24;
+  const [minSize, maxSize] = mode === 'macro' ? [10, 38] : [4, 24];
+  // Anchor the company node a bit larger so it's always visually dominant.
+  if (node.type === 'company') return mode === 'macro' ? maxSize : 24;
+  if (emissions === 0 || maxEmissions === 0) return minSize;
   const logEmissions = Math.log10(emissions + 1);
   const logMax = Math.log10(maxEmissions + 1);
-  return minSize + ((logEmissions / logMax) * (maxSize - minSize));
+  return minSize + (logEmissions / logMax) * (maxSize - minSize);
 }
 
 export default function GHGGraph() {
@@ -50,7 +89,11 @@ export default function GHGGraph() {
   const zoomRef = useRef(1);
   const [dimensions, setDimensions] = useState({ width: 800, height: 600 });
   const [hoveredNode, setHoveredNode] = useState<GraphNode | null>(null);
+  // Selection state — graph node click sets `selectedNode`; analytics-panel
+  // record drill-down sets `selectedActivityId` (kept as id-string so we can
+  // pin the row across panel re-renders).
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
+  const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [filterPanelOpen, setFilterPanelOpen] = useState(true);
 
   // Graph payload fetched from /mock-data/graph.json at runtime.
@@ -61,7 +104,20 @@ export default function GHGGraph() {
   const [selectedYear] = useState(2025);
   const [scopeFilter, setScopeFilter] = useState<{ scope1: boolean; scope2: boolean }>({ scope1: true, scope2: true });
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
+  const [sourceTypeFilter, setSourceTypeFilter] = useState<Set<SourceType>>(
+    () => new Set(ALL_SOURCE_TYPES),
+  );
+  const [emissionTypeFilter, setEmissionTypeFilter] = useState<Set<EmissionType>>(
+    () => new Set(ALL_EMISSION_TYPES),
+  );
   const [searchQuery, setSearchQuery] = useState('');
+  const [topologyMode, setTopologyMode] = useState<TopologyMode>('macro');
+  const [themeKey, setThemeKey] = useState<ThemeKey>(DEFAULT_THEME);
+  const theme = THEMES[themeKey];
+
+  // PII gate — unmask toggle is only available when the URL carries `?pii=1`.
+  const searchParams = useSearchParams();
+  const piiUnlocked = searchParams?.get('pii') === '1';
 
   useEffect(() => {
     let cancelled = false;
@@ -115,6 +171,38 @@ export default function GHGGraph() {
     if (!graph) return { nodes: [], links: [] };
     let nodes = graph.nodes as GraphNode[];
     let links = graph.links as GraphLink[];
+
+    // Topology mode — macro hides activity/source_document layers (~520 nodes
+    // reduce to ~32). Lower layers are still in `graph` for the side panel.
+    if (topologyMode === 'macro') {
+      nodes = nodes.filter((n) => MACRO_TYPES.has(n.type));
+    }
+
+    // Filter by source_type — applies to emission_source nodes (whose
+    // children's source_type drives source_type_counts), and indirectly
+    // dims facilities that lose all their sources.
+    if (sourceTypeFilter.size < ALL_SOURCE_TYPES.length) {
+      const allowedEsKeys = new Set<string>();
+      // An emission_source is "kept" if any of its child activities matches.
+      // We pre-compute this from the full graph to honor the filter even in
+      // macro mode (where activities aren't in `nodes`).
+      for (const a of graph.nodes) {
+        if (a.type !== 'activity_data') continue;
+        if (sourceTypeFilter.has(a.source_type)) {
+          allowedEsKeys.add(`es-${a.facility_id}-${a.source_code}-${a.material_code}`);
+        }
+      }
+      nodes = nodes.filter((n) =>
+        n.type !== 'emission_source' || allowedEsKeys.has(n.id),
+      );
+    }
+
+    // Filter by emission_type
+    if (emissionTypeFilter.size < ALL_EMISSION_TYPES.length) {
+      nodes = nodes.filter(
+        (n) => n.type !== 'emission_source' || emissionTypeFilter.has(n.emission_type),
+      );
+    }
 
     // Filter by scope
     if (!scopeFilter.scope1 || !scopeFilter.scope2) {
@@ -176,7 +264,7 @@ export default function GHGGraph() {
     });
 
     return { nodes, links };
-  }, [graph, scopeFilter, selectedFacilities, searchQuery, neighborMap]);
+  }, [graph, topologyMode, sourceTypeFilter, emissionTypeFilter, scopeFilter, selectedFacilities, searchQuery, neighborMap]);
 
   // Handle resize
   useEffect(() => {
@@ -203,8 +291,8 @@ export default function GHGGraph() {
 
   // Custom node rendering
   const paintNode = useCallback((node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
-    const size = getNodeSize(node, maxEmissions);
-    const color = getNodeColor(node as GHGNode);
+    const size = getNodeSize(node, maxEmissions, topologyMode);
+    const color = theme.colorFor(node as GHGNode);
     const highlighted = isHighlighted(node.id);
     const isSelected = selectedNode?.id === node.id;
 
@@ -236,19 +324,21 @@ export default function GHGGraph() {
       ctx.stroke();
     }
 
-    // Draw label only when zoomed in or hovered
-    const showLabel = globalScale > 1.5 || (hoveredNode && highlighted);
+    // Draw label — always visible for company/facility in macro mode (few enough
+    // nodes that legibility wins). emission_source labels appear when zoomed.
+    const alwaysLabeled = topologyMode === 'macro' && (node.type === 'company' || node.type === 'facility');
+    const showLabel = alwaysLabeled || globalScale > 1.2 || (hoveredNode && highlighted);
     if (showLabel) {
-      const fontSize = Math.max(10 / globalScale, 3);
+      const fontSize = Math.max((node.type === 'company' ? 14 : 11) / globalScale, 3);
       ctx.font = `${fontSize}px 'Geist', sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'top';
-      ctx.fillStyle = `rgba(156, 163, 175, ${opacity})`;
+      ctx.fillStyle = `rgba(229, 231, 235, ${opacity})`;
       ctx.fillText(node.name, node.x!, node.y! + size + 4 / globalScale);
     }
 
     ctx.globalAlpha = 1;
-  }, [maxEmissions, isHighlighted, hoveredNode, selectedNode]);
+  }, [maxEmissions, topologyMode, isHighlighted, hoveredNode, selectedNode, theme]);
 
   // Custom link rendering
   const paintLink = useCallback((link: GraphLink, ctx: CanvasRenderingContext2D) => {
@@ -269,39 +359,14 @@ export default function GHGGraph() {
     ctx.stroke();
   }, [isHighlighted, hoveredNode]);
 
-  // Get linked documents for a node
-  const getLinkedDocuments = useCallback((nodeId: string): GraphNode[] => {
-    const visited = new Set<string>();
-    const documents: GraphNode[] = [];
-
-    const traverse = (currentId: string) => {
-      if (visited.has(currentId)) return;
-      visited.add(currentId);
-
-      const node = graphData.nodes.find(n => n.id === currentId);
-      if (node?.type === 'source_document') {
-        documents.push(node);
-        return;
-      }
-
-      graphData.links.forEach(link => {
-        const sourceId = typeof link.source === 'string' ? link.source : link.source.id;
-        const targetId = typeof link.target === 'string' ? link.target : link.target.id;
-        if (sourceId === currentId) traverse(targetId);
-      });
-    };
-
-    traverse(nodeId);
-    return documents;
-  }, [graphData]);
-
-  // Focus on a specific node
+  // Focus on a specific node — used by analytics-panel "jump to facility" actions.
   const focusOnNode = useCallback((node: GraphNode) => {
     if (fgRef.current && node.x !== undefined && node.y !== undefined) {
       fgRef.current.centerAt(node.x, node.y, 500);
       fgRef.current.zoom(2.5, 500);
     }
   }, []);
+  void focusOnNode;
 
   // Reset view
   const resetView = useCallback(() => {
@@ -341,15 +406,21 @@ export default function GHGGraph() {
         nodeCanvasObject={paintNode}
         linkCanvasObject={paintLink}
         nodePointerAreaPaint={(node, color, ctx) => {
-          const size = getNodeSize(node as GraphNode, maxEmissions);
+          const size = getNodeSize(node as GraphNode, maxEmissions, topologyMode);
           ctx.fillStyle = color;
           ctx.beginPath();
           ctx.arc(node.x!, node.y!, size + 4, 0, 2 * Math.PI);
           ctx.fill();
         }}
         onNodeHover={(node) => setHoveredNode(node as GraphNode | null)}
-        onNodeClick={(node) => setSelectedNode(node as GraphNode)}
-        onBackgroundClick={() => setSelectedNode(null)}
+        onNodeClick={(node) => {
+          setSelectedNode(node as GraphNode);
+          setSelectedActivityId(null);
+        }}
+        onBackgroundClick={() => {
+          setSelectedNode(null);
+          setSelectedActivityId(null);
+        }}
         onZoom={({ k }) => { zoomRef.current = k; }}
         d3AlphaDecay={0.02}
         d3VelocityDecay={0.3}
@@ -374,9 +445,14 @@ export default function GHGGraph() {
           <div className="bg-[#1a1d24]/90 backdrop-blur-md border border-white/10 rounded-lg px-4 py-3 shadow-xl">
             <div className="text-white font-medium text-sm">{hoveredNode.name}</div>
             <div className="flex items-center gap-3 mt-2">
-              <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: getNodeColor(hoveredNode as GHGNode) + '30', color: getNodeColor(hoveredNode as GHGNode) }}>
-                {NODE_TYPE_LABELS[hoveredNode.type].en}
-              </span>
+              {(() => {
+                const c = theme.colorFor(hoveredNode as GHGNode);
+                return (
+                  <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: c + '30', color: c }}>
+                    {NODE_TYPE_LABELS[hoveredNode.type].en}
+                  </span>
+                );
+              })()}
               {hoveredNode.scope && (
                 <span className={`text-xs px-2 py-0.5 rounded ${hoveredNode.scope === 1 ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'}`}>
                   Scope {hoveredNode.scope}
@@ -420,13 +496,44 @@ export default function GHGGraph() {
                 />
               </div>
 
-              {/* Year */}
-              <div>
-                <label className="text-gray-400 text-xs uppercase tracking-wider">Year</label>
-                <div className="mt-1 flex gap-2">
-                  <button className="flex-1 bg-white/10 text-white text-sm py-2 rounded-lg border border-white/20">
+              {/* Year + Topology */}
+              <div className="flex gap-2">
+                <div className="flex-1">
+                  <label className="text-gray-400 text-xs uppercase tracking-wider">Year</label>
+                  <button className="mt-1 w-full bg-white/10 text-white text-sm py-2 rounded-lg border border-white/20">
                     {selectedYear}
                   </button>
+                </div>
+                <div className="flex-1">
+                  <label className="text-gray-400 text-xs uppercase tracking-wider">View</label>
+                  <button
+                    onClick={() => setTopologyMode((m) => (m === 'macro' ? 'expanded' : 'macro'))}
+                    className="mt-1 w-full bg-white/5 hover:bg-white/10 text-white text-sm py-2 rounded-lg border border-white/10 transition-colors"
+                    title={topologyMode === 'macro' ? '展開所有節點 (~700)' : '回到精簡視圖 (~32 nodes)'}
+                  >
+                    {topologyMode === 'macro' ? '精簡' : '展開'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Theme picker */}
+              <div>
+                <label className="text-gray-400 text-xs uppercase tracking-wider">Theme</label>
+                <div className="mt-2 grid grid-cols-3 gap-1">
+                  {THEME_ORDER.map((key) => {
+                    const t = THEMES[key];
+                    const active = themeKey === key;
+                    return (
+                      <button
+                        key={key}
+                        onClick={() => setThemeKey(key)}
+                        title={`${t.englishName} — ${t.description}`}
+                        className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border ${active ? 'bg-white/10 text-white border-white/20' : 'bg-white/5 text-gray-500 border-white/5 hover:text-gray-300'}`}
+                      >
+                        {t.name}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
@@ -478,161 +585,107 @@ export default function GHGGraph() {
                   )}
                 </div>
               </div>
+
+              {/* Source Type */}
+              <div>
+                <label className="text-gray-400 text-xs uppercase tracking-wider">Source Type</label>
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                  {ALL_SOURCE_TYPES.map((st) => {
+                    const active = sourceTypeFilter.has(st);
+                    return (
+                      <button
+                        key={st}
+                        onClick={() => {
+                          setSourceTypeFilter((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(st)) next.delete(st);
+                            else next.add(st);
+                            return next;
+                          });
+                        }}
+                        className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border ${active ? 'bg-white/10 text-white border-white/20' : 'bg-white/5 text-gray-500 border-white/5'}`}
+                      >
+                        {SOURCE_TYPE_LABELS[st]}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Emission Type */}
+              <div>
+                <label className="text-gray-400 text-xs uppercase tracking-wider">Emission Type</label>
+                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                  {ALL_EMISSION_TYPES.map((et) => {
+                    const active = emissionTypeFilter.has(et);
+                    return (
+                      <button
+                        key={et}
+                        onClick={() => {
+                          setEmissionTypeFilter((prev) => {
+                            const next = new Set(prev);
+                            if (next.has(et)) next.delete(et);
+                            else next.add(et);
+                            return next;
+                          });
+                        }}
+                        className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border ${active ? 'bg-white/10 text-white border-white/20' : 'bg-white/5 text-gray-500 border-white/5'}`}
+                      >
+                        {EMISSION_TYPE_LABELS[et].zh}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
           )}
         </div>
       </div>
 
-      {/* Stats Card - Top Right */}
-      <div className="absolute top-4 right-4 z-40">
-        <div className="bg-[#1a1d24]/80 backdrop-blur-md border border-white/10 rounded-xl p-4 min-w-[200px]">
-          <div className="text-gray-400 text-xs uppercase tracking-wider mb-2">Total Emissions</div>
-          <div className="text-white text-2xl font-semibold">{formatNumber(stats.total)} <span className="text-sm text-gray-400">tCO₂e</span></div>
-          <div className="mt-3 space-y-2">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-amber-500"></span>
-                <span className="text-gray-400 text-sm">Scope 1</span>
-              </div>
-              <span className="text-white text-sm">{formatNumber(stats.scope1)}</span>
-            </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="w-2 h-2 rounded-full bg-blue-500"></span>
-                <span className="text-gray-400 text-sm">Scope 2</span>
-              </div>
-              <span className="text-white text-sm">{formatNumber(stats.scope2)}</span>
+      {/* Top Stats Strip — sticky */}
+      <div className="absolute top-4 right-4 z-40 flex items-center gap-3">
+        <div className="bg-[#1a1d24]/85 backdrop-blur-md border border-white/10 rounded-xl px-5 py-3 flex items-center gap-6">
+          <div>
+            <div className="text-gray-400 text-[10px] uppercase tracking-wider">Total Emissions ({selectedYear})</div>
+            <div className="text-white text-xl font-semibold leading-tight">
+              {formatNumber(stats.total)} <span className="text-xs text-gray-400">tCO₂e</span>
             </div>
           </div>
-          <div className="mt-3 pt-3 border-t border-white/10">
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-gray-400">Facilities</span>
-              <span className="text-white">{facilities.length}</span>
+          <div className="h-8 w-px bg-white/10" />
+          <div className="flex flex-col gap-0.5">
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-2 h-2 rounded-full bg-amber-500" />
+              <span className="text-gray-400">Scope 1</span>
+              <span className="text-white tabular-nums">{formatNumber(stats.scope1)}</span>
             </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="w-2 h-2 rounded-full bg-blue-500" />
+              <span className="text-gray-400">Scope 2</span>
+              <span className="text-white tabular-nums">{formatNumber(stats.scope2)}</span>
+            </div>
+          </div>
+          <div className="h-8 w-px bg-white/10" />
+          <div className="flex gap-4 text-xs">
+            <Stat label="場站" value={graph.meta.facility_count} />
+            <Stat label="排放源" value={graph.meta.emission_source_count} />
+            <Stat label="活動紀錄" value={graph.meta.record_count} />
+            <Stat label="原始檔案" value={graph.meta.source_document_count} />
           </div>
         </div>
       </div>
 
-      {/* Inspector Panel - Right Side */}
-      <div
-        className={`absolute top-24 right-4 z-40 transition-all duration-300 ${selectedNode ? 'translate-x-0 opacity-100' : 'translate-x-8 opacity-0 pointer-events-none'}`}
-      >
-        {selectedNode && (
-          <div className="bg-[#1a1d24]/90 backdrop-blur-md border border-white/10 rounded-xl w-80 max-h-[calc(100vh-140px)] overflow-y-auto">
-            {/* Header */}
-            <div className="p-4 border-b border-white/10">
-              <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <h3 className="text-white font-semibold text-lg">{selectedNode.name}</h3>
-                </div>
-                <button
-                  onClick={() => setSelectedNode(null)}
-                  className="text-gray-400 hover:text-white p-1"
-                >
-                  <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                  </svg>
-                </button>
-              </div>
-              <div className="flex items-center gap-2 mt-3">
-                <span className="text-xs px-2 py-1 rounded" style={{ backgroundColor: getNodeColor(selectedNode as GHGNode) + '30', color: getNodeColor(selectedNode as GHGNode) }}>
-                  {NODE_TYPE_LABELS[selectedNode.type].zh} / {NODE_TYPE_LABELS[selectedNode.type].en}
-                </span>
-                {selectedNode.scope && (
-                  <span className={`text-xs px-2 py-1 rounded ${selectedNode.scope === 1 ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'}`}>
-                    Scope {selectedNode.scope}
-                  </span>
-                )}
-              </div>
-            </div>
+      {/* Analytics Panel — slides in from right when a node is selected */}
+      <AnalyticsPanel
+        graph={graph}
+        selectedNode={selectedNode}
+        selectedActivityId={selectedActivityId}
+        piiUnlocked={piiUnlocked}
+        theme={theme}
+        onSelectNode={(n) => { setSelectedNode(n); setSelectedActivityId(null); }}
+        onSelectActivity={setSelectedActivityId}
+        onClose={() => { setSelectedNode(null); setSelectedActivityId(null); }}
+      />
 
-            {/* Metrics */}
-            {(nodeEmissions(selectedNode) > 0 || selectedNode.type === 'activity_data') && (
-              <div className="p-4 border-b border-white/10">
-                <h4 className="text-gray-400 text-xs uppercase tracking-wider mb-3">Metrics</h4>
-                <div className="space-y-3">
-                  {nodeEmissions(selectedNode) > 0 && (
-                    <div>
-                      <div className="text-gray-400 text-sm">Emissions</div>
-                      <div className="text-white text-xl font-medium">
-                        {nodeEmissions(selectedNode).toLocaleString(undefined, { maximumFractionDigits: 4 })} <span className="text-sm text-gray-400">tCO₂e</span>
-                      </div>
-                      <div className="text-gray-500 text-xs mt-1">
-                        {stats.total > 0 ? ((nodeEmissions(selectedNode) / stats.total) * 100).toFixed(1) : '0.0'}% of company total
-                      </div>
-                    </div>
-                  )}
-                  {selectedNode.type === 'activity_data' && (
-                    <div className="mt-2">
-                      <div className="text-gray-400 text-sm">Activity Value</div>
-                      <div className="text-white text-lg">
-                        {selectedNode.activity_value.toLocaleString()} <span className="text-sm text-gray-400">{selectedNode.activity_unit}</span>
-                      </div>
-                      {selectedNode.period_label && (
-                        <div className="text-gray-500 text-xs mt-1">Period: {selectedNode.period_label}</div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Emission Factor */}
-            {selectedNode.type === 'activity_data' && (
-              <div className="p-4 border-b border-white/10">
-                <h4 className="text-gray-400 text-xs uppercase tracking-wider mb-3">Emission Factor</h4>
-                <div className="text-white">
-                  {selectedNode.emission_factor.value} <span className="text-gray-400 text-sm">{selectedNode.emission_factor.unit}</span>
-                </div>
-                <div className="text-gray-500 text-xs mt-1">
-                  Source: {selectedNode.emission_factor.source}
-                </div>
-              </div>
-            )}
-
-            {/* Linked Documents */}
-            {selectedNode.type !== 'source_document' && (
-              <div className="p-4 border-b border-white/10">
-                <h4 className="text-gray-400 text-xs uppercase tracking-wider mb-3">Linked Documents</h4>
-                <div className="space-y-2">
-                  {getLinkedDocuments(selectedNode.id).length > 0 ? (
-                    getLinkedDocuments(selectedNode.id).map(doc => (
-                      <button
-                        key={doc.id}
-                        onClick={() => {
-                          setSelectedNode(doc);
-                          focusOnNode(doc);
-                        }}
-                        className="w-full text-left px-3 py-2 bg-white/5 hover:bg-white/10 rounded-lg text-sm text-gray-300 transition-colors flex items-center gap-2"
-                      >
-                        <svg className="w-4 h-4 text-gray-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                        </svg>
-                        {doc.name}
-                      </button>
-                    ))
-                  ) : (
-                    <div className="text-gray-500 text-sm">No linked documents</div>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* Actions */}
-            <div className="p-4">
-              <button
-                onClick={() => focusOnNode(selectedNode)}
-                className="w-full bg-white/10 hover:bg-white/15 text-white py-2 px-4 rounded-lg text-sm font-medium transition-colors flex items-center justify-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0zM10 7v3m0 0v3m0-3h3m-3 0H7" />
-                </svg>
-                Focus Subtree
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
 
       {/* Zoom Controls - Bottom Right */}
       <div className="absolute bottom-4 right-4 z-40">
@@ -667,23 +720,30 @@ export default function GHGGraph() {
 
       {/* Legend - Bottom Left */}
       <div className="absolute bottom-4 left-4 z-40">
-        <div className="bg-[#1a1d24]/80 backdrop-blur-md border border-white/10 rounded-xl p-3">
+        <div className="bg-[#1a1d24]/80 backdrop-blur-md border border-white/10 rounded-xl px-3 py-2">
           <div className="flex items-center gap-4 text-xs">
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-amber-500"></span>
-              <span className="text-gray-400">Scope 1</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-blue-500"></span>
-              <span className="text-gray-400">Scope 2</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <span className="w-3 h-3 rounded-full bg-gray-500"></span>
-              <span className="text-gray-400">Structural</span>
-            </div>
+            <span className="text-gray-500 text-[10px] uppercase tracking-wider">{theme.englishName}</span>
+            {theme.legend.map((entry) => (
+              <div key={entry.label} className="flex items-center gap-2">
+                <span
+                  className="w-3 h-3 rounded-full"
+                  style={{ backgroundColor: entry.color }}
+                />
+                <span className="text-gray-300">{entry.label}</span>
+              </div>
+            ))}
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+function Stat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="flex flex-col">
+      <span className="text-gray-400 text-[10px] uppercase tracking-wider">{label}</span>
+      <span className="text-white tabular-nums">{value.toLocaleString()}</span>
     </div>
   );
 }
