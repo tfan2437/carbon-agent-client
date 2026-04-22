@@ -2,28 +2,11 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import ForceGraph2D, { ForceGraphMethods, NodeObject, LinkObject } from 'react-force-graph-2d';
-import { GHGNode, GHG_DATA, getNodeColor, NODE_TYPE_LABELS, calculateScopeEmissions, getFacilities, NodeType, Scope } from '@/lib/ghg-data';
+import { GHGGraphData, GHGNode, getNodeColor, NODE_TYPE_LABELS, Scope } from '@/lib/types';
 
-// Extended types for force graph
-interface GraphNode extends NodeObject {
-  id: string;
-  name: string;
-  nameEn?: string;
-  type: NodeType;
-  scope: Scope;
-  emissions?: number;
-  activityValue?: number;
-  activityUnit?: string;
-  emissionFactor?: {
-    value: number;
-    unit: string;
-    source: string;
-  };
-  facility?: string;
-  year: number;
-  x?: number;
-  y?: number;
-}
+// Force-graph augments nodes with x/y during simulation; intersect with the
+// discriminated union so per-type narrowing (activity_data etc.) still works.
+type GraphNode = GHGNode & NodeObject;
 
 interface GraphLink extends LinkObject {
   source: string | GraphNode;
@@ -35,19 +18,28 @@ interface GraphData {
   links: GraphLink[];
 }
 
-// Format large numbers
+// source_document has no emissions field; everything else carries emissions_tco2e.
+function nodeEmissions(node: GHGNode): number {
+  return 'emissions_tco2e' in node ? node.emissions_tco2e : 0;
+}
+
+// Format numbers for display. Values are tCO₂e, which span ~0.0005 to ~1115 in
+// current data, so we keep 4dp for sub-1 values instead of collapsing to "0".
 function formatNumber(num: number): string {
   if (num >= 1000000) return `${(num / 1000000).toFixed(1)}M`;
   if (num >= 1000) return `${(num / 1000).toFixed(1)}k`;
+  if (num > 0 && num < 1) return num.toFixed(4);
+  if (num < 10) return num.toFixed(2);
   return num.toFixed(0);
 }
 
 // Calculate node size based on emissions (log scale)
 function getNodeSize(node: GraphNode, maxEmissions: number): number {
-  if (!node.emissions || node.emissions === 0) return 4;
+  const emissions = nodeEmissions(node);
+  if (emissions === 0 || maxEmissions === 0) return 4;
   const minSize = 4;
   const maxSize = 24;
-  const logEmissions = Math.log10(node.emissions + 1);
+  const logEmissions = Math.log10(emissions + 1);
   const logMax = Math.log10(maxEmissions + 1);
   return minSize + ((logEmissions / logMax) * (maxSize - minSize));
 }
@@ -61,21 +53,53 @@ export default function GHGGraph() {
   const [selectedNode, setSelectedNode] = useState<GraphNode | null>(null);
   const [filterPanelOpen, setFilterPanelOpen] = useState(true);
 
+  // Graph payload fetched from /mock-data/graph.json at runtime.
+  const [graph, setGraph] = useState<GHGGraphData | null>(null);
+  const [graphError, setGraphError] = useState<Error | null>(null);
+
   // Filters
-  const [selectedYear] = useState(2024);
+  const [selectedYear] = useState(2025);
   const [scopeFilter, setScopeFilter] = useState<{ scope1: boolean; scope2: boolean }>({ scope1: true, scope2: true });
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Calculate stats
-  const stats = useMemo(() => calculateScopeEmissions(GHG_DATA.nodes), []);
-  const facilities = useMemo(() => getFacilities(GHG_DATA.nodes), []);
-  const maxEmissions = useMemo(() => Math.max(...GHG_DATA.nodes.map(n => n.emissions || 0)), []);
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/mock-data/graph.json')
+      .then((r) => {
+        if (!r.ok) throw new Error(`Failed to load graph.json: ${r.status} ${r.statusText}`);
+        return r.json() as Promise<GHGGraphData>;
+      })
+      .then((data) => { if (!cancelled) setGraph(data); })
+      .catch((err: Error) => { if (!cancelled) setGraphError(err); });
+    return () => { cancelled = true; };
+  }, []);
+
+  // Hard fail — no silent fallback to static data (per CLAUDE.md conventions).
+  if (graphError) throw graphError;
+
+  // Stats pulled from meta (top-level summary, already computed by build_graph.py).
+  const stats = useMemo(() => ({
+    scope1: graph?.meta.scope_1_tco2e ?? 0,
+    scope2: graph?.meta.scope_2_tco2e ?? 0,
+    total: graph?.meta.total_tco2e ?? 0,
+  }), [graph]);
+
+  const facilities = useMemo(
+    () => graph?.nodes.filter((n) => n.type === 'facility') ?? [],
+    [graph]
+  );
+
+  const maxEmissions = useMemo(() => {
+    if (!graph) return 0;
+    return Math.max(0, ...graph.nodes.map(nodeEmissions));
+  }, [graph]);
 
   // Build neighbor map for hover highlighting
   const neighborMap = useMemo(() => {
     const map = new Map<string, Set<string>>();
-    GHG_DATA.links.forEach(link => {
+    if (!graph) return map;
+    graph.links.forEach(link => {
       const sourceId = typeof link.source === 'string' ? link.source : (link.source as GraphNode).id;
       const targetId = typeof link.target === 'string' ? link.target : (link.target as GraphNode).id;
       if (!map.has(sourceId)) map.set(sourceId, new Set());
@@ -84,12 +108,13 @@ export default function GHGGraph() {
       map.get(targetId)!.add(sourceId);
     });
     return map;
-  }, []);
+  }, [graph]);
 
   // Filter graph data
   const graphData: GraphData = useMemo(() => {
-    let nodes = GHG_DATA.nodes as GraphNode[];
-    let links = GHG_DATA.links as GraphLink[];
+    if (!graph) return { nodes: [], links: [] };
+    let nodes = graph.nodes as GraphNode[];
+    let links = graph.links as GraphLink[];
 
     // Filter by scope
     if (!scopeFilter.scope1 || !scopeFilter.scope2) {
@@ -129,7 +154,7 @@ export default function GHGGraph() {
       const query = searchQuery.toLowerCase();
       const matchingIds = new Set(
         nodes
-          .filter(n => n.name.toLowerCase().includes(query) || (n.nameEn && n.nameEn.toLowerCase().includes(query)))
+          .filter(n => n.name.toLowerCase().includes(query))
           .map(n => n.id)
       );
 
@@ -151,7 +176,7 @@ export default function GHGGraph() {
     });
 
     return { nodes, links };
-  }, [scopeFilter, selectedFacilities, searchQuery, neighborMap]);
+  }, [graph, scopeFilter, selectedFacilities, searchQuery, neighborMap]);
 
   // Handle resize
   useEffect(() => {
@@ -285,15 +310,24 @@ export default function GHGGraph() {
     }
   }, []);
 
-  // Initial fit
+  // Initial fit — re-run when graph loads so zoomToFit sees real nodes.
   useEffect(() => {
+    if (!graph) return;
     const timer = setTimeout(() => {
       if (fgRef.current) {
         fgRef.current.zoomToFit(400, 80);
       }
     }, 500);
     return () => clearTimeout(timer);
-  }, []);
+  }, [graph]);
+
+  if (!graph) {
+    return (
+      <div ref={containerRef} className="w-full h-screen flex items-center justify-center" style={{ backgroundColor: '#0B0E14' }}>
+        <div className="text-gray-400 text-sm">Loading graph data…</div>
+      </div>
+    );
+  }
 
   return (
     <div ref={containerRef} className="relative w-full h-screen overflow-hidden" style={{ backgroundColor: '#0B0E14' }}>
@@ -339,9 +373,6 @@ export default function GHGGraph() {
         >
           <div className="bg-[#1a1d24]/90 backdrop-blur-md border border-white/10 rounded-lg px-4 py-3 shadow-xl">
             <div className="text-white font-medium text-sm">{hoveredNode.name}</div>
-            {hoveredNode.nameEn && (
-              <div className="text-gray-400 text-xs mt-0.5">{hoveredNode.nameEn}</div>
-            )}
             <div className="flex items-center gap-3 mt-2">
               <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: getNodeColor(hoveredNode as GHGNode) + '30', color: getNodeColor(hoveredNode as GHGNode) }}>
                 {NODE_TYPE_LABELS[hoveredNode.type].en}
@@ -351,9 +382,9 @@ export default function GHGGraph() {
                   Scope {hoveredNode.scope}
                 </span>
               )}
-              {hoveredNode.emissions && (
+              {nodeEmissions(hoveredNode) > 0 && (
                 <span className="text-gray-300 text-xs">
-                  {formatNumber(hoveredNode.emissions)} kgCO₂e
+                  {formatNumber(nodeEmissions(hoveredNode))} tCO₂e
                 </span>
               )}
             </div>
@@ -456,7 +487,7 @@ export default function GHGGraph() {
       <div className="absolute top-4 right-4 z-40">
         <div className="bg-[#1a1d24]/80 backdrop-blur-md border border-white/10 rounded-xl p-4 min-w-[200px]">
           <div className="text-gray-400 text-xs uppercase tracking-wider mb-2">Total Emissions</div>
-          <div className="text-white text-2xl font-semibold">{formatNumber(stats.total)} <span className="text-sm text-gray-400">kgCO₂e</span></div>
+          <div className="text-white text-2xl font-semibold">{formatNumber(stats.total)} <span className="text-sm text-gray-400">tCO₂e</span></div>
           <div className="mt-3 space-y-2">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
@@ -493,9 +524,6 @@ export default function GHGGraph() {
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <h3 className="text-white font-semibold text-lg">{selectedNode.name}</h3>
-                  {selectedNode.nameEn && (
-                    <p className="text-gray-400 text-sm mt-0.5">{selectedNode.nameEn}</p>
-                  )}
                 </div>
                 <button
                   onClick={() => setSelectedNode(null)}
@@ -519,27 +547,30 @@ export default function GHGGraph() {
             </div>
 
             {/* Metrics */}
-            {(selectedNode.emissions || selectedNode.activityValue) && (
+            {(nodeEmissions(selectedNode) > 0 || selectedNode.type === 'activity_data') && (
               <div className="p-4 border-b border-white/10">
                 <h4 className="text-gray-400 text-xs uppercase tracking-wider mb-3">Metrics</h4>
                 <div className="space-y-3">
-                  {selectedNode.emissions && (
+                  {nodeEmissions(selectedNode) > 0 && (
                     <div>
                       <div className="text-gray-400 text-sm">Emissions</div>
                       <div className="text-white text-xl font-medium">
-                        {selectedNode.emissions.toLocaleString()} <span className="text-sm text-gray-400">kgCO₂e</span>
+                        {nodeEmissions(selectedNode).toLocaleString(undefined, { maximumFractionDigits: 4 })} <span className="text-sm text-gray-400">tCO₂e</span>
                       </div>
                       <div className="text-gray-500 text-xs mt-1">
-                        {((selectedNode.emissions / stats.total) * 100).toFixed(1)}% of company total
+                        {stats.total > 0 ? ((nodeEmissions(selectedNode) / stats.total) * 100).toFixed(1) : '0.0'}% of company total
                       </div>
                     </div>
                   )}
-                  {selectedNode.activityValue && (
+                  {selectedNode.type === 'activity_data' && (
                     <div className="mt-2">
                       <div className="text-gray-400 text-sm">Activity Value</div>
                       <div className="text-white text-lg">
-                        {selectedNode.activityValue.toLocaleString()} <span className="text-sm text-gray-400">{selectedNode.activityUnit}</span>
+                        {selectedNode.activity_value.toLocaleString()} <span className="text-sm text-gray-400">{selectedNode.activity_unit}</span>
                       </div>
+                      {selectedNode.period_label && (
+                        <div className="text-gray-500 text-xs mt-1">Period: {selectedNode.period_label}</div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -547,14 +578,14 @@ export default function GHGGraph() {
             )}
 
             {/* Emission Factor */}
-            {selectedNode.emissionFactor && (
+            {selectedNode.type === 'activity_data' && (
               <div className="p-4 border-b border-white/10">
                 <h4 className="text-gray-400 text-xs uppercase tracking-wider mb-3">Emission Factor</h4>
                 <div className="text-white">
-                  {selectedNode.emissionFactor.value} <span className="text-gray-400 text-sm">{selectedNode.emissionFactor.unit}</span>
+                  {selectedNode.emission_factor.value} <span className="text-gray-400 text-sm">{selectedNode.emission_factor.unit}</span>
                 </div>
                 <div className="text-gray-500 text-xs mt-1">
-                  Source: {selectedNode.emissionFactor.source}
+                  Source: {selectedNode.emission_factor.source}
                 </div>
               </div>
             )}

@@ -15,5 +15,11 @@ node_modules
 .next/
 .DS_Store
 
+
+
 # TypeScript incremental build cache
 tsconfig.tsbuildinfo
+
+# Generated output data (keep scripts tracked)
+outputs/*
+!outputs/scripts/

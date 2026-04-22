@@ -50,6 +50,34 @@ export interface EmissionFactorInfo {
   year: number;
 }
 
+export interface MonthlyBreakdown {
+  month: number;                  // 1..12
+  activity_value: number;
+  emissions_kgco2e: number;
+  emissions_tco2e: number;
+}
+
+// One emission entry per accrual year. Cross-year electricity bills produce
+// 2 entries (e.g., billing 2024-12-16 → 2025-01-15 splits into 2024 + 2025).
+// Refrigerant entries always carry monthly_breakdown (12 equal slices).
+export interface EmissionEntry {
+  year: number;
+  period_start: string;
+  period_end: string;
+  days_in_year: number;
+  scope: 1 | 2;
+  factor_value: number;
+  factor_unit: string;
+  factor_source: string;
+  factor_year: number;
+  activity_value: number;
+  activity_unit: string;
+  emissions_kgco2e: number;
+  emissions_tco2e: number;
+  gas_breakdown: GasEmission[];
+  monthly_breakdown: MonthlyBreakdown[] | null;
+}
+
 // Extraction payload summaries (one per source_type) — abbreviated for inspector
 
 export interface FuelExtractionSummary {
@@ -122,6 +150,10 @@ export interface CompanyNode extends BaseNode {
   scope_1_tco2e: number;
   scope_2_tco2e: number;
   record_count: number;
+  // 12-element [Jan..Dec] tCO₂e for primary_year. Cross-year edges sit in
+  // their accrual year — entries outside primary_year are not included here.
+  monthly_emissions: number[];
+  monthly_emissions_by_scope: { '1': number[]; '2': number[] };
 }
 
 export interface FacilityNode extends BaseNode {
@@ -129,6 +161,7 @@ export interface FacilityNode extends BaseNode {
   scope: null;
   facility_id: string;            // D-code e.g. "D00001"
   emissions_tco2e: number;
+  monthly_emissions: number[];    // 12-element, primary_year
 }
 
 export interface EmissionSourceNode extends BaseNode {
@@ -142,10 +175,14 @@ export interface EmissionSourceNode extends BaseNode {
   is_biofuel: boolean;
   facility_id: string;
   emissions_tco2e: number;
+  monthly_emissions: number[];    // 12-element, primary_year
+  record_count: number;           // child activity_data count
 }
 
 export interface ActivityDataNode extends BaseNode {
   type: 'activity_data';
+  // ID is `activity-{document_id}` for length-1 emission arrays;
+  // `activity-{document_id}-y{YYYY}` when one record produces cross-year splits.
   document_id: string;            // UUID from backend DocumentRecord
   facility_id: string;
   source_code: string;
@@ -157,10 +194,14 @@ export interface ActivityDataNode extends BaseNode {
   activity_unit: string;
   emission_factor: EmissionFactorInfo;
   gas_breakdown: GasEmission[];
+  monthly_breakdown: MonthlyBreakdown[] | null;  // refrigerant only; 12 equal slices
   emissions_kgco2e: number;
   emissions_tco2e: number;
   source_type: SourceType;
   source_file: string;
+  file_hash: string;              // SHA256 of source_file (evidence cache key)
+  file_processing_time_ms: number | null;
+  evidence_url: string | null;    // null in v1; populated when --copy-evidence runs
   status: ProcessingStatus;
   warnings: string[];
   extraction_summary: ExtractionSummary;
@@ -174,6 +215,7 @@ export interface SourceDocumentNode extends BaseNode {
   source_type: SourceType;
   record_count: number;           // how many activity nodes feed from this file
   status: ProcessingStatus;
+  file_hash: string | null;       // first record's hash (assumed identical across siblings)
 }
 
 export type GHGNode =
@@ -202,6 +244,8 @@ export interface GHGGraphMeta {
   facility_count: number;
   emission_source_count: number;
   source_document_count: number;
+  source_type_counts: Record<SourceType, number>;
+  pii_included: boolean;
 }
 
 export interface GHGGraphData {
