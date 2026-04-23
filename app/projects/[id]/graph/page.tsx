@@ -1,9 +1,7 @@
 import Link from "next/link";
-import { notFound } from "next/navigation";
 import { ArrowLeft } from "lucide-react";
 
 import { createClient } from "@/lib/supabase/server";
-import type { GHGGraphData } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { GraphViewClient } from "@/components/projects/graph-view-client";
 
@@ -17,9 +15,13 @@ export default async function ProjectGraphPage({
   const { id } = await params;
   const supabase = await createClient();
 
+  // Presence check only — skip the heavy graph_json payload so the RSC
+  // roundtrip stays <100 ms. The client component reads the blob from
+  // the prefetch cache (populated on the project detail page), falling
+  // back to a client-side Supabase query for direct URL visits.
   const { data: graphRow } = await supabase
     .from("graphs")
-    .select("graph_json, job_id, built_at")
+    .select("job_id, built_at")
     .eq("project_id", id)
     .order("built_at", { ascending: false })
     .limit(1)
@@ -45,10 +47,5 @@ export default async function ProjectGraphPage({
     );
   }
 
-  // graph_json is stored as Supabase Json (our hand-written type); we know
-  // the backend writes the GHGGraphData shape documented in docs/integration.md.
-  const data = graphRow.graph_json as unknown as GHGGraphData;
-  if (!data || typeof data !== "object") notFound();
-
-  return <GraphViewClient data={data} />;
+  return <GraphViewClient projectId={id} />;
 }

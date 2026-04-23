@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { GraphCacheProvider } from "@/components/projects/graph-cache-context";
 
 export default function ProjectsLayout({ children }: { children: ReactNode }) {
   return (
@@ -17,7 +18,7 @@ export default function ProjectsLayout({ children }: { children: ReactNode }) {
           </Link>
         </div>
       </header>
-      {children}
+      <GraphCacheProvider>{children}</GraphCacheProvider>
     </div>
   );
 }

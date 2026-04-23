@@ -8,10 +8,12 @@ import { toast } from "sonner";
 import { createClient } from "@/lib/supabase/client";
 import { COMPANIES, TERMINAL_JOB_STATUSES } from "@/lib/domain/ghg";
 import type { Document, Job, JobStatus, Project } from "@/lib/domain/ghg";
+import type { GHGGraphData } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import { UploadSection } from "@/components/projects/upload-section";
 import { DocumentsSection } from "@/components/projects/documents-section";
 import { ProcessingSection } from "@/components/projects/processing-section";
+import { useGraphCache } from "@/components/projects/graph-cache-context";
 
 function companyLabel(companyId: string): string {
   return COMPANIES.find((c) => c.id === companyId)?.name ?? companyId;
@@ -41,6 +43,7 @@ export function ProjectShell({
   initialJobs,
 }: ProjectShellProps) {
   const supabase = useMemo(() => createClient(), []);
+  const graphCache = useGraphCache();
   const [documents, setDocuments] = useState<Document[]>(initialDocuments);
   const [jobs, setJobs] = useState<Job[]>(initialJobs);
   const seenTerminals = useRef<Set<string>>(
@@ -50,6 +53,8 @@ export function ProjectShell({
         .map((j) => j.id),
     ),
   );
+
+  const hasSucceededJob = jobs.some((j) => j.status === "succeeded");
 
   // Keep the documents list sorted newest-first on every change.
   const addOrUpdateDocument = useCallback((doc: Document) => {
@@ -150,6 +155,32 @@ export function ProjectShell({
       supabase.removeChannel(channel);
     };
   }, [supabase, project.id, addOrUpdateJob]);
+
+  // Prefetch the built graph into the client-side cache as soon as we
+  // know a successful job exists. Makes the subsequent "View Graph"
+  // click render instantly instead of waiting on an RSC roundtrip.
+  useEffect(() => {
+    if (!hasSucceededJob) return;
+    if (graphCache.get(project.id)) return;
+    let cancelled = false;
+    (async () => {
+      const { data: row } = await supabase
+        .from("graphs")
+        .select("graph_json")
+        .eq("project_id", project.id)
+        .order("built_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (cancelled || !row?.graph_json) return;
+      graphCache.set(
+        project.id,
+        row.graph_json as unknown as GHGGraphData,
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [hasSucceededJob, supabase, project.id, graphCache]);
 
   return (
     <main className="container mx-auto max-w-4xl px-6 py-10 space-y-6">
