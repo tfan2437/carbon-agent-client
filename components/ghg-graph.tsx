@@ -83,7 +83,11 @@ function getNodeSize(node: GraphNode, maxEmissions: number, mode: TopologyMode):
   return minSize + (logEmissions / logMax) * (maxSize - minSize);
 }
 
-export default function GHGGraph() {
+export interface GHGGraphProps {
+  initialData?: GHGGraphData;
+}
+
+export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
   const fgRef = useRef<ForceGraphMethods<GraphNode, GraphLink> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef(1);
@@ -96,8 +100,9 @@ export default function GHGGraph() {
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [filterPanelOpen, setFilterPanelOpen] = useState(true);
 
-  // Graph payload fetched from /mock-data/graph.json at runtime.
-  const [graph, setGraph] = useState<GHGGraphData | null>(null);
+  // Graph payload: either supplied by the parent (project view) or fetched
+  // from /mock-data/graph.json (standalone /demo page).
+  const [graph, setGraph] = useState<GHGGraphData | null>(initialData ?? null);
   const [graphError, setGraphError] = useState<Error | null>(null);
 
   // Filters
@@ -120,6 +125,7 @@ export default function GHGGraph() {
   const piiUnlocked = searchParams?.get('pii') === '1';
 
   useEffect(() => {
+    if (initialData) return;
     let cancelled = false;
     fetch('/mock-data/graph.json')
       .then((r) => {
@@ -129,7 +135,7 @@ export default function GHGGraph() {
       .then((data) => { if (!cancelled) setGraph(data); })
       .catch((err: Error) => { if (!cancelled) setGraphError(err); });
     return () => { cancelled = true; };
-  }, []);
+  }, [initialData]);
 
   // Hard fail — no silent fallback to static data (per CLAUDE.md conventions).
   if (graphError) throw graphError;
@@ -291,6 +297,10 @@ export default function GHGGraph() {
 
   // Custom node rendering
   const paintNode = useCallback((node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
+    // Force-graph may invoke paint before the sim has placed a node,
+    // or for orphans in data with missing/bad links. Skip until it has
+    // finite coordinates — otherwise canvas APIs throw.
+    if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
     const size = getNodeSize(node, maxEmissions, topologyMode);
     const color = theme.colorFor(node as GHGNode);
     const highlighted = isHighlighted(node.id);
@@ -350,7 +360,14 @@ export default function GHGGraph() {
   const paintLink = useCallback((link: GraphLink, ctx: CanvasRenderingContext2D) => {
     const source = link.source as GraphNode;
     const target = link.target as GraphNode;
-    if (!source.x || !source.y || !target.x || !target.y) return;
+    if (
+      !Number.isFinite(source.x) ||
+      !Number.isFinite(source.y) ||
+      !Number.isFinite(target.x) ||
+      !Number.isFinite(target.y)
+    ) {
+      return;
+    }
 
     const sourceHighlighted = isHighlighted(source.id);
     const targetHighlighted = isHighlighted(target.id);
@@ -421,6 +438,7 @@ export default function GHGGraph() {
         nodeCanvasObject={paintNode}
         linkCanvasObject={paintLink}
         nodePointerAreaPaint={(node, color, ctx) => {
+          if (!Number.isFinite(node.x) || !Number.isFinite(node.y)) return;
           const size = getNodeSize(node as GraphNode, maxEmissions, topologyMode);
           ctx.fillStyle = color;
           ctx.beginPath();
