@@ -54,6 +54,17 @@ export async function POST(req: Request) {
     headers["Authorization"] = `Bearer ${idToken}`;
   }
 
+  const credsJson = process.env.GOOGLE_CREDENTIALS_JSON;
+  console.log("[jobs-proxy]", {
+    target: `${backendUrl.replace(/\/$/, "")}/v1/projects/${project_id}/jobs`,
+    has_bearer: Boolean(idToken),
+    bearer_len: idToken?.length ?? 0,
+    has_creds_json: Boolean(credsJson),
+    creds_json_len: credsJson?.length ?? 0,
+    creds_json_preview: credsJson ? credsJson.slice(0, 30) : null,
+    skip_google_auth: process.env.GHG_SKIP_GOOGLE_AUTH === "1",
+  });
+
   const upstream = await fetch(
     `${backendUrl.replace(/\/$/, "")}/v1/projects/${project_id}/jobs`,
     {
