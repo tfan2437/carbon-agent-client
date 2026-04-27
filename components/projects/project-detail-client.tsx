@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type DragEvent,
   type KeyboardEvent,
 } from "react";
 import Link from "next/link";
@@ -314,30 +313,48 @@ export function ProjectDetailClient({
     [project.id, validateAndCollect, addOrUpdateDocument],
   );
 
-  const onDragEnter = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragDepth.current += 1;
-    if (e.dataTransfer?.types?.includes("Files")) setIsDragging(true);
-  };
-  const onDragLeave = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragDepth.current = Math.max(0, dragDepth.current - 1);
-    if (dragDepth.current === 0) setIsDragging(false);
-  };
-  const onDragOver = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
-  };
-  const onDrop = (e: DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    dragDepth.current = 0;
-    setIsDragging(false);
-    if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
-  };
+  // Window-level drag listeners so files dragged anywhere on the page light
+  // up the full-screen drop overlay. The DropZone block on the left only
+  // handles click-to-pick and the keyboard shortcut.
+  useEffect(() => {
+    const isFilesDrag = (e: globalThis.DragEvent): boolean =>
+      e.dataTransfer?.types?.includes("Files") ?? false;
+
+    const onWindowDragEnter = (e: globalThis.DragEvent) => {
+      if (!isFilesDrag(e)) return;
+      e.preventDefault();
+      dragDepth.current += 1;
+      setIsDragging(true);
+    };
+    const onWindowDragLeave = (e: globalThis.DragEvent) => {
+      e.preventDefault();
+      dragDepth.current = Math.max(0, dragDepth.current - 1);
+      if (dragDepth.current === 0) setIsDragging(false);
+    };
+    const onWindowDragOver = (e: globalThis.DragEvent) => {
+      if (!isFilesDrag(e)) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "copy";
+    };
+    const onWindowDrop = (e: globalThis.DragEvent) => {
+      e.preventDefault();
+      dragDepth.current = 0;
+      setIsDragging(false);
+      if (e.dataTransfer?.files?.length) handleFiles(e.dataTransfer.files);
+    };
+
+    window.addEventListener("dragenter", onWindowDragEnter);
+    window.addEventListener("dragleave", onWindowDragLeave);
+    window.addEventListener("dragover", onWindowDragOver);
+    window.addEventListener("drop", onWindowDrop);
+    return () => {
+      window.removeEventListener("dragenter", onWindowDragEnter);
+      window.removeEventListener("dragleave", onWindowDragLeave);
+      window.removeEventListener("dragover", onWindowDragOver);
+      window.removeEventListener("drop", onWindowDrop);
+    };
+  }, [handleFiles]);
+
   const openPicker = () => inputRef.current?.click();
   const onZoneKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     if (e.key === "Enter" || e.key === " ") {
@@ -557,10 +574,6 @@ export function ProjectDetailClient({
         >
           <DropZone
             isDragging={isDragging}
-            onDragEnter={onDragEnter}
-            onDragLeave={onDragLeave}
-            onDragOver={onDragOver}
-            onDrop={onDrop}
             onClick={openPicker}
             onKeyDown={onZoneKeyDown}
             inputRef={inputRef}
@@ -731,28 +744,102 @@ export function ProjectDetailClient({
           </button>
         </div>
       </div>
+
+      {isDragging && <FullScreenDropOverlay />}
     </Shell>
   );
 }
+
+const FullScreenDropOverlay: React.FC = () => (
+  <div
+    aria-hidden
+    style={{
+      position: "fixed",
+      inset: 0,
+      zIndex: 9999,
+      pointerEvents: "none",
+      background: "rgba(20, 16, 14, 0.62)",
+      backdropFilter: "blur(10px)",
+      WebkitBackdropFilter: "blur(10px)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      animation: "drop-overlay-in 160ms ease-out",
+    }}
+  >
+    <div
+      style={{
+        position: "absolute",
+        inset: 32,
+        border: "3px dashed rgba(222, 115, 86, 0.65)",
+        borderRadius: 20,
+        background: "rgba(180, 88, 64, 0.08)",
+      }}
+    />
+    <div
+      style={{
+        position: "relative",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        textAlign: "center",
+        gap: 18,
+        padding: 32,
+      }}
+    >
+      <div
+        style={{
+          width: 88,
+          height: 88,
+          borderRadius: 22,
+          background: "var(--primary-soft)",
+          border: "1px solid var(--primary-line)",
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--primary)",
+          boxShadow: "0 12px 32px rgba(0,0,0,0.35)",
+        }}
+      >
+        <Icon name="upload" size={40} color="var(--primary)" />
+      </div>
+      <h2
+        className="serif"
+        style={{ fontSize: 30, color: "var(--fg)", margin: 0, lineHeight: 1.15 }}
+      >
+        Drop documents anywhere
+      </h2>
+      <p
+        style={{
+          fontSize: 14,
+          color: "var(--fg-3)",
+          maxWidth: 380,
+          lineHeight: 1.5,
+          margin: 0,
+        }}
+      >
+        Release to upload. PDF · XLSX · JPG · PNG, up to 50&nbsp;MB each.
+      </p>
+    </div>
+    <style>{`
+      @keyframes drop-overlay-in {
+        from { opacity: 0; }
+        to   { opacity: 1; }
+      }
+    `}</style>
+  </div>
+);
 
 // ---------- Drop zone ----------
 
 const DropZone: React.FC<{
   isDragging: boolean;
-  onDragEnter: (e: DragEvent<HTMLDivElement>) => void;
-  onDragLeave: (e: DragEvent<HTMLDivElement>) => void;
-  onDragOver: (e: DragEvent<HTMLDivElement>) => void;
-  onDrop: (e: DragEvent<HTMLDivElement>) => void;
   onClick: () => void;
   onKeyDown: (e: KeyboardEvent<HTMLDivElement>) => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
   onInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
 }> = ({
   isDragging,
-  onDragEnter,
-  onDragLeave,
-  onDragOver,
-  onDrop,
   onClick,
   onKeyDown,
   inputRef,
@@ -767,10 +854,6 @@ const DropZone: React.FC<{
     aria-label="Upload files"
     onClick={onClick}
     onKeyDown={onKeyDown}
-    onDragEnter={onDragEnter}
-    onDragOver={onDragOver}
-    onDragLeave={onDragLeave}
-    onDrop={onDrop}
     onMouseEnter={() => setIsHover(true)}
     onMouseLeave={() => setIsHover(false)}
     style={{
