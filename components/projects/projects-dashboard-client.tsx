@@ -1,10 +1,24 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { toast } from "sonner";
 import { Icon, Sparkline } from "@/components/engram/Primitives";
 import { Shell, PageHeader } from "@/components/engram/Shell";
 import type { Project, ProjStatus } from "@/components/engram/Data";
+import { bulkDeleteProjects } from "@/lib/ghg/projects";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 
 // Projects dashboard client — UI layer. Data is fetched server-side in app/projects/page.tsx.
 
@@ -51,7 +65,18 @@ export const CompletionRing: React.FC<{ pct: number }> = ({ pct }) => {
   );
 };
 
-export const ProjectsList: React.FC<{ projects: Project[]; onOpen: (id: string) => void }> = ({ projects, onOpen }) => {
+interface ProjectsViewProps {
+  projects: Project[];
+  selectedIds: Set<string>;
+  anySelected: boolean;
+  onSingleClick: (id: string) => void;
+  onDoubleClick: (id: string) => void;
+  onToggleSelect: (id: string) => void;
+}
+
+export const ProjectsList: React.FC<ProjectsViewProps> = ({
+  projects, selectedIds, anySelected, onSingleClick, onDoubleClick, onToggleSelect,
+}) => {
   const [hover, setHover] = React.useState<string | null>(null);
   const headStyle: React.CSSProperties = {
     fontSize: 11.5, color: "var(--fg-4)", fontWeight: 500,
@@ -66,48 +91,74 @@ export const ProjectsList: React.FC<{ projects: Project[]; onOpen: (id: string) 
           <col />
           <col style={{ width: 160 }} />
           <col style={{ width: 140 }} />
+          <col style={{ width: 140 }} />
           <col style={{ width: 120 }} />
         </colgroup>
         <thead>
           <tr>
             <th scope="col" style={headStyle}>Name</th>
             <th scope="col" style={headStyle}>Status</th>
+            <th scope="col" style={headStyle}>Last updated</th>
             <th scope="col" style={headStyle}>Emission year</th>
             <th scope="col" style={headStyle}>Completion</th>
           </tr>
         </thead>
         <tbody>
           {projects.map((p) => {
+            const isSelected = selectedIds.has(p.id);
             const rowStyle: React.CSSProperties = {
               borderBottom: "1px solid var(--border)",
               fontSize: 13.5,
-              background: hover === p.id ? "rgba(255,255,255,0.02)" : "transparent",
+              background: isSelected
+                ? "rgba(222,115,86,0.08)"
+                : hover === p.id
+                  ? "rgba(255,255,255,0.02)"
+                  : "transparent",
               cursor: "pointer",
+              userSelect: "none",
             };
             const cellStyle: React.CSSProperties = { padding: "11px 12px", verticalAlign: "middle" };
+            const showCheckbox = isSelected || anySelected || hover === p.id;
             return (
               <tr key={p.id}
                 onMouseEnter={() => setHover(p.id)}
                 onMouseLeave={() => setHover(null)}
-                onClick={() => onOpen(p.id)}
+                onClick={() => onSingleClick(p.id)}
+                onDoubleClick={() => onDoubleClick(p.id)}
+                aria-selected={isSelected}
                 style={rowStyle}>
                 <td style={cellStyle}>
                   <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-                    <input type="checkbox"
+                    <Checkbox
+                      checked={isSelected}
+                      onCheckedChange={() => onToggleSelect(p.id)}
+                      onClick={(e) => e.stopPropagation()}
+                      onDoubleClick={(e) => e.stopPropagation()}
                       aria-label={`Select ${p.name}`}
+                      style={{
+                        opacity: showCheckbox ? 1 : 0,
+                        transition: "opacity 150ms",
+                        cursor: "pointer",
+                        flexShrink: 0,
+                      }} />
+                    <Link
+                      href={`/projects/${p.id}`}
                       onClick={(e) => e.stopPropagation()}
                       style={{
-                        width: 20, height: 20, margin: 0, accentColor: "var(--primary)",
-                        opacity: hover === p.id ? 1 : 0.2, transition: "opacity 150ms",
-                        flex: "0 0 20px",
-                      }} />
-                    <span style={{ color: "var(--fg)", fontWeight: 500, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        color: "var(--fg)", fontWeight: 500,
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                        textDecoration: "none",
+                      }}
+                      className="hover:underline">
                       {p.name}
-                    </span>
+                    </Link>
                   </div>
                 </td>
                 <td style={cellStyle}>
                   <StatusPill status={p.projStatus} />
+                </td>
+                <td style={{ ...cellStyle, color: "var(--fg-3)", fontSize: 12.5 }}>
+                  {p.updated}
                 </td>
                 <td style={{ ...cellStyle, color: "var(--fg-3)", fontSize: 12.5, fontVariantNumeric: "tabular-nums" }}>
                   {p.year}
@@ -135,57 +186,207 @@ export const ProjectsList: React.FC<{ projects: Project[]; onOpen: (id: string) 
   );
 };
 
-export const ProjectsCards: React.FC<{ projects: Project[]; onOpen: (id: string) => void }> = ({ projects, onOpen }) => (
-  <div style={{
-    display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16,
-    padding: "8px 20px 32px",
-  }}>
-    {projects.map((p) => (
-      <div key={p.id} className="card" style={{
-        padding: 16, cursor: "pointer", minHeight: 180,
-        display: "flex", flexDirection: "column", gap: 12,
-        transition: "border-color 180ms, background 180ms",
-      }}
-      onClick={() => onOpen(p.id)}
-      onMouseEnter={(e) => { e.currentTarget.style.borderColor = "var(--primary-line)"; e.currentTarget.style.background = "rgba(222,115,86,0.03)"; }}
-      onMouseLeave={(e) => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "rgba(255,255,255,0.015)"; }}
-      >
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 15, fontWeight: 510, color: "var(--fg)", lineHeight: 1.3, marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", letterSpacing: "-0.01em" }}>
-              {p.name}
+export const ProjectsCards: React.FC<ProjectsViewProps> = ({
+  projects, selectedIds, anySelected, onSingleClick, onDoubleClick, onToggleSelect,
+}) => {
+  const [hover, setHover] = React.useState<string | null>(null);
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 16,
+      padding: "8px 20px 32px",
+    }}>
+      {projects.map((p) => {
+        const isSelected = selectedIds.has(p.id);
+        const isHover = hover === p.id;
+        const showCheckbox = isSelected || anySelected || isHover;
+        const cardStyle: React.CSSProperties = {
+          padding: 16, cursor: "pointer", minHeight: 180,
+          display: "flex", flexDirection: "column", gap: 12,
+          transition: "border-color 180ms, background 180ms",
+          userSelect: "none",
+          borderColor: isSelected ? "var(--primary-line)" : isHover ? "var(--primary-line)" : "var(--border)",
+          background: isSelected
+            ? "rgba(222,115,86,0.06)"
+            : isHover
+              ? "rgba(222,115,86,0.03)"
+              : "rgba(255,255,255,0.015)",
+        };
+        return (
+          <div key={p.id}
+            className="card"
+            style={cardStyle}
+            onClick={() => onSingleClick(p.id)}
+            onDoubleClick={() => onDoubleClick(p.id)}
+            onMouseEnter={() => setHover(p.id)}
+            onMouseLeave={() => setHover(null)}
+            aria-selected={isSelected}>
+            <div style={{ display: "flex", alignItems: "flex-start", gap: 10 }}>
+              <Checkbox
+                checked={isSelected}
+                onCheckedChange={() => onToggleSelect(p.id)}
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => e.stopPropagation()}
+                aria-label={`Select ${p.name}`}
+                style={{
+                  marginTop: 3,
+                  opacity: showCheckbox ? 1 : 0,
+                  transition: "opacity 150ms",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <Link
+                  href={`/projects/${p.id}`}
+                  onClick={(e) => e.stopPropagation()}
+                  style={{
+                    display: "block",
+                    fontSize: 15, fontWeight: 510, color: "var(--fg)", lineHeight: 1.3,
+                    marginBottom: 4, whiteSpace: "nowrap", overflow: "hidden",
+                    textOverflow: "ellipsis", letterSpacing: "-0.01em",
+                    textDecoration: "none",
+                  }}
+                  className="hover:underline">
+                  {p.name}
+                </Link>
+                <div style={{ fontSize: 12, color: "var(--fg-3)" }}>
+                  {p.company} · {p.year}
+                </div>
+              </div>
+              <button type="button" className="btn btn-ghost btn-icon" aria-label="More" onClick={(e) => e.stopPropagation()}><Icon name="more" size={14} color="var(--fg-3)" /></button>
             </div>
-            <div style={{ fontSize: 12, color: "var(--fg-3)" }}>
-              {p.company} · {p.year}
+
+            <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <div className="stat-num peach" style={{ fontSize: 24 }}>
+                  {p.tco2e === 0 ? "—" : p.tco2e.toLocaleString()}
+                </div>
+                <div className="stat-label" style={{ fontSize: 10 }}>tCO₂e</div>
+              </div>
+              <Sparkline data={p.spark} width={120} height={30} color="#DE7356" />
+            </div>
+
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: "auto" }}>
+              <StatusPill status={p.projStatus} />
+              <span style={{ fontSize: 11.5, color: "var(--fg-4)", marginLeft: "auto" }}>
+                {p.uploadedDocs} docs · {p.updated}
+              </span>
             </div>
           </div>
-          <button type="button" className="btn btn-ghost btn-icon" aria-label="More" onClick={(e) => e.stopPropagation()}><Icon name="more" size={14} color="var(--fg-3)" /></button>
+        );
+      })}
+      {projects.length === 0 && (
+        <div style={{ gridColumn: "1 / -1", padding: "40px 12px", textAlign: "center", color: "var(--fg-4)", fontSize: 13 }}>
+          No projects match this filter.
         </div>
+      )}
+    </div>
+  );
+};
 
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 12 }}>
-          <div>
-            <div className="stat-num peach" style={{ fontSize: 24 }}>
-              {p.tco2e === 0 ? "—" : p.tco2e.toLocaleString()}
-            </div>
-            <div className="stat-label" style={{ fontSize: 10 }}>tCO₂e</div>
-          </div>
-          <Sparkline data={p.spark} width={120} height={30} color="#DE7356" />
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", marginTop: "auto" }}>
-          <StatusPill status={p.projStatus} />
-          <span style={{ fontSize: 11.5, color: "var(--fg-4)", marginLeft: "auto" }}>
-            {p.uploadedDocs} docs · {p.updated}
-          </span>
-        </div>
-      </div>
-    ))}
-    {projects.length === 0 && (
-      <div style={{ gridColumn: "1 / -1", padding: "40px 12px", textAlign: "center", color: "var(--fg-4)", fontSize: 13 }}>
-        No projects match this filter.
-      </div>
-    )}
+const BulkActionBar: React.FC<{
+  count: number;
+  onDelete: () => void;
+  onClear: () => void;
+}> = ({ count, onDelete, onClear }) => (
+  <div
+    role="region"
+    aria-label="Bulk selection actions"
+    style={{
+      position: "fixed",
+      left: "50%",
+      bottom: 24,
+      transform: "translateX(-50%)",
+      zIndex: 50,
+      display: "flex",
+      alignItems: "center",
+      gap: 8,
+      padding: "8px 8px 8px 16px",
+      background: "var(--bg-2)",
+      border: "1px solid var(--border)",
+      borderRadius: 999,
+      boxShadow: "0 12px 32px rgba(0,0,0,0.45)",
+      animation: "bar-rise 180ms ease-out",
+    }}>
+    <span style={{ fontSize: 13, color: "var(--fg)", whiteSpace: "nowrap" }}>
+      {count} selected
+    </span>
+    <div style={{ width: 1, height: 18, background: "var(--border)" }} />
+    <button type="button" className="btn btn-ghost btn-sm" onClick={onClear}>
+      Clear
+    </button>
+    <button
+      type="button"
+      className="btn btn-sm"
+      onClick={onDelete}
+      style={{
+        background: "rgba(139, 0, 0, 0.5)",
+        color: "#fff",
+        border: "none",
+      }}>
+      <Icon name="trash" size={13} color="#fff" /> Delete
+    </button>
+    <style>{`
+      @keyframes bar-rise {
+        from { opacity: 0; transform: translate(-50%, 8px); }
+        to   { opacity: 1; transform: translate(-50%, 0); }
+      }
+    `}</style>
   </div>
+);
+
+const BulkDeleteDialog: React.FC<{
+  open: boolean;
+  onOpenChange: (next: boolean) => void;
+  projects: { id: string; name: string }[];
+  deleting: boolean;
+  onConfirm: () => void;
+}> = ({ open, onOpenChange, projects, deleting, onConfirm }) => (
+  <AlertDialog open={open} onOpenChange={onOpenChange}>
+    <AlertDialogContent>
+      <AlertDialogHeader>
+        <AlertDialogTitle>
+          Delete {projects.length} {projects.length === 1 ? "project" : "projects"}?
+        </AlertDialogTitle>
+        <AlertDialogDescription>
+          The following {projects.length === 1 ? "project" : "projects"} and all of their
+          documents, jobs, records, emission results, and built graphs will be permanently
+          removed. This cannot be undone.
+        </AlertDialogDescription>
+      </AlertDialogHeader>
+      <ul
+        style={{
+          maxHeight: 240,
+          overflowY: "auto",
+          margin: "8px 0",
+          padding: "8px 12px",
+          background: "rgba(255,255,255,0.02)",
+          border: "1px solid var(--border)",
+          borderRadius: 6,
+          fontSize: 13,
+          color: "var(--fg-2)",
+        }}>
+        {projects.map((p) => (
+          <li key={p.id} style={{ padding: "3px 0", listStyle: "none" }}>
+            {p.name}
+          </li>
+        ))}
+      </ul>
+      <AlertDialogFooter>
+        <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+        <AlertDialogAction
+          onClick={(e) => {
+            e.preventDefault();
+            onConfirm();
+          }}
+          disabled={deleting}
+          className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+          {deleting
+            ? "Deleting…"
+            : `Delete ${projects.length} ${projects.length === 1 ? "project" : "projects"}`}
+        </AlertDialogAction>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
 );
 
 type ViewMode = "list" | "cards";
@@ -209,6 +410,9 @@ export default function ProjectsDashboardClient({
   const router = useRouter();
   const [view, setView] = React.useState<ViewMode>("list");
   const [statusFilter, setStatusFilter] = React.useState<StatusFilter>("all");
+  const [selectedIds, setSelectedIds] = React.useState<Set<string>>(() => new Set());
+  const [dialogOpen, setDialogOpen] = React.useState(false);
+  const [deleting, setDeleting] = React.useState(false);
 
   const counts: Record<string, number> = { all: projects.length };
   projects.forEach((p) => { counts[p.projStatus] = (counts[p.projStatus] || 0) + 1; });
@@ -217,7 +421,72 @@ export default function ProjectsDashboardClient({
     ? projects
     : projects.filter((p) => p.projStatus === statusFilter);
 
-  const openProject = (id: string) => router.push(`/projects/${id}`);
+  const navigate = React.useCallback(
+    (id: string) => router.push(`/projects/${id}`),
+    [router],
+  );
+
+  const toggleSelect = React.useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const handleSingleClick = React.useCallback((id: string) => {
+    toggleSelect(id);
+  }, [toggleSelect]);
+
+  const handleDoubleClick = React.useCallback((id: string) => {
+    navigate(id);
+  }, [navigate]);
+
+  const clearSelection = React.useCallback(() => {
+    setSelectedIds(new Set());
+  }, []);
+
+  const selectedProjects = React.useMemo(
+    () => projects.filter((p) => selectedIds.has(p.id)).map((p) => ({ id: p.id, name: p.name })),
+    [projects, selectedIds],
+  );
+
+  async function handleConfirmDelete() {
+    if (selectedProjects.length === 0) return;
+    setDeleting(true);
+    try {
+      const result = await bulkDeleteProjects(selectedProjects);
+      if (result.ok.length > 0) {
+        toast.success(
+          `Deleted ${result.ok.length} ${result.ok.length === 1 ? "project" : "projects"}`,
+        );
+      }
+      if (result.failed.length > 0) {
+        const first = result.failed[0];
+        const more = result.failed.length - 1;
+        toast.error(
+          more > 0
+            ? `Failed to delete ${first.name} (${first.error}) and ${more} other(s)`
+            : `Failed to delete ${first.name}: ${first.error}`,
+        );
+      }
+      // Drop the successfully-deleted ids from selection; failures stay selected for retry.
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        result.ok.forEach((p) => next.delete(p.id));
+        return next;
+      });
+      setDialogOpen(false);
+      router.refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Bulk delete failed");
+    } finally {
+      setDeleting(false);
+    }
+  }
+
+  const anySelected = selectedIds.size > 0;
 
   return (
     <Shell>
@@ -321,9 +590,37 @@ export default function ProjectsDashboardClient({
         </div>
 
         {view === "list"
-          ? <ProjectsList projects={visible} onOpen={openProject} />
-          : <ProjectsCards projects={visible} onOpen={openProject} />}
+          ? <ProjectsList
+              projects={visible}
+              selectedIds={selectedIds}
+              anySelected={anySelected}
+              onSingleClick={handleSingleClick}
+              onDoubleClick={handleDoubleClick}
+              onToggleSelect={toggleSelect} />
+          : <ProjectsCards
+              projects={visible}
+              selectedIds={selectedIds}
+              anySelected={anySelected}
+              onSingleClick={handleSingleClick}
+              onDoubleClick={handleDoubleClick}
+              onToggleSelect={toggleSelect} />}
       </div>
+
+      {anySelected && (
+        <BulkActionBar
+          count={selectedIds.size}
+          onClear={clearSelection}
+          onDelete={() => setDialogOpen(true)}
+        />
+      )}
+
+      <BulkDeleteDialog
+        open={dialogOpen}
+        onOpenChange={(next) => { if (!deleting) setDialogOpen(next); }}
+        projects={selectedProjects}
+        deleting={deleting}
+        onConfirm={handleConfirmDelete}
+      />
     </Shell>
   );
 }

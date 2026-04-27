@@ -71,3 +71,34 @@ export async function deleteProject(projectId: string): Promise<void> {
     throw new Error(`Delete project failed: ${projectErr.message}`);
   }
 }
+
+export interface BulkDeleteResult {
+  ok: { id: string; name: string }[];
+  failed: { id: string; name: string; error: string }[];
+}
+
+/**
+ * Cascade-delete many projects in parallel. Each call goes through the same
+ * deleteProject() above, so cascade semantics are identical. Failures don't
+ * block other deletes — partial successes are surfaced via the result.
+ */
+export async function bulkDeleteProjects(
+  projects: { id: string; name: string }[],
+): Promise<BulkDeleteResult> {
+  const results = await Promise.allSettled(
+    projects.map((p) => deleteProject(p.id)),
+  );
+  const ok: BulkDeleteResult["ok"] = [];
+  const failed: BulkDeleteResult["failed"] = [];
+  results.forEach((r, i) => {
+    if (r.status === "fulfilled") {
+      ok.push(projects[i]);
+    } else {
+      failed.push({
+        ...projects[i],
+        error: r.reason instanceof Error ? r.reason.message : String(r.reason),
+      });
+    }
+  });
+  return { ok, failed };
+}
