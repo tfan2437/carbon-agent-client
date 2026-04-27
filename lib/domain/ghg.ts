@@ -55,7 +55,7 @@ export interface CompanyOption {
 
 // Phase 2 hardcoded company list. Phase 4 moves this to Supabase.
 export const COMPANIES: readonly CompanyOption[] = [
-  { id: "hohsin", name: "和欣汽車客運" },
+  { id: "lingcarbon-transport", name: "零碳運輸股份有限公司" },
 ] as const;
 
 export interface CreateJobRequest {

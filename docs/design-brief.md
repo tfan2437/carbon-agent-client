@@ -116,7 +116,7 @@ Serious, calm, archival. Whitespace-confident. A reader should feel they're in a
 - Centered ~560-px card on a large cream-tinted background (the one place cream shows up warmly — a signature Anthropic move).
 - H1 serif `New project`.
 - Three fields stacked, with generous label typography:
-  1. **Project name** — text input, serif-styled placeholder `e.g. 和欣汽車客運 2025`.
+  1. **Project name** — text input, serif-styled placeholder `e.g. 零碳運輸 2025`.
   2. **Company** — select from the preset `COMPANIES` list (from `lib/domain/ghg.ts`).
   3. **Reporting year** — year picker, default 2025, range 2024–2026.
 - Two buttons at the bottom, right-aligned: ghost `Cancel`, peach `Create project`.
@@ -201,7 +201,7 @@ This is the core of the "demo user flow" — three stacked sections that corresp
 
 ### 4.5 Demo page — `/demo` ✓ exists
 
-Identical to the graph view but with a small pinned banner: *"You're viewing read-only mock data (和欣汽車客運 2025). Create a project to upload your own."* + button to `/projects/new`.
+Identical to the graph view but with a small pinned banner: *"You're viewing read-only mock data (零碳運輸 2025). Create a project to upload your own."* + button to `/projects/new`.
 
 ---
 

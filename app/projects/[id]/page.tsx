@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import { createClient } from "@/lib/supabase/server";
-import { ProjectShell } from "@/components/projects/project-shell";
+import { ProjectDetailClient } from "@/components/projects/project-detail-client";
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +31,7 @@ export default async function ProjectDetailPage({
   if (!project) notFound();
 
   return (
-    <ProjectShell
+    <ProjectDetailClient
       project={project}
       initialDocuments={documentsRes.data ?? []}
       initialJobs={jobsRes.data ?? []}

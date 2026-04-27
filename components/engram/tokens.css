@@ -1,0 +1,231 @@
+/* LingCarbon Engram — Design Tokens
+   Warm Claude-peach aesthetic over a dark data-app canvas.
+   Structural rules (density, border opacity, weight philosophy) inspired by Linear.
+*/
+:root {
+  /* Surfaces — warm-cool neutral, not pure gray */
+  --bg:            oklch(0.145 0.004 60);   /* page canvas ≈ #131211 */
+  --bg-deep:       oklch(0.115 0.004 60);   /* sidebar, deepest */
+  --surface:       oklch(0.19 0.005 60);    /* cards */
+  --surface-2:     oklch(0.23 0.008 60);    /* hover / popover */
+  --surface-3:     oklch(0.28 0.010 60);    /* active row */
+
+  /* Foreground — warm near-white */
+  --fg:            oklch(0.985 0.003 60);   /* headings */
+  --fg-2:          oklch(0.86 0.004 60);    /* body */
+  --fg-3:          oklch(0.66 0.006 60);    /* muted */
+  --fg-4:          oklch(0.48 0.006 60);    /* placeholder, timestamps */
+
+  /* Borders — whisper-thin, warm-tinted */
+  --border:        oklch(1 0 0 / 0.07);
+  --border-2:      oklch(1 0 0 / 0.11);
+  --border-3:      oklch(1 0 0 / 0.16);
+
+  /* Brand — Claude peach */
+  --primary:       #DE7356;
+  --primary-hover: #E58971;
+  --primary-ink:   #1a0f0a;
+  --primary-soft:  oklch(0.70 0.14 45 / 0.15);
+  --primary-line:  oklch(0.70 0.14 45 / 0.35);
+
+  /* Cream accent — signature warm moment */
+  --cream:         #F8EED2;
+  --cream-soft:    oklch(0.95 0.04 85 / 0.08);
+
+  /* Scopes */
+  --scope-1:       #DE7356;    /* peach */
+  --scope-2:       #6FA4C9;    /* cool blue */
+
+  /* Status */
+  --success:       oklch(0.72 0.14 155);
+  --success-soft:  oklch(0.72 0.14 155 / 0.14);
+  --warn:          #E9B84E;
+  --warn-soft:     oklch(0.80 0.13 85 / 0.14);
+  --danger:        oklch(0.65 0.22 25);
+  --danger-soft:   oklch(0.65 0.22 25 / 0.14);
+  --info:          #6FA4C9;
+  --info-soft:     oklch(0.70 0.07 240 / 0.15);
+
+  /* Typography — Linear uses Inter for both headings and body, so we do too.
+     --font-serif is kept as a CSS-variable alias so existing .serif class refs still work,
+     but it now points at Inter (display optical-size via opsz where available). */
+  --font-serif:   "Inter", "Inter Variable", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, sans-serif;
+  --font-sans:    "Inter", "Inter Variable", "SF Pro Display", -apple-system, BlinkMacSystemFont, "Segoe UI", ui-sans-serif, sans-serif;
+  --font-mono:    "Geist Mono", "Berkeley Mono", ui-monospace, "SF Mono", Menlo, monospace;
+
+  /* Radii */
+  --r-xs: 4px;
+  --r-sm: 6px;
+  --r-md: 8px;
+  --r-lg: 12px;
+  --r-xl: 16px;
+  --r-pill: 9999px;
+
+  /* Shadows — used very sparingly */
+  --ring-focus: 0 0 0 2px oklch(0.70 0.14 45 / 0.35);
+  --shadow-pop: 0 1px 0 0 rgba(0,0,0,0.05), 0 12px 32px -8px rgba(0,0,0,0.5), 0 0 0 1px var(--border-2);
+}
+
+/* Global resets — scoped to our pages */
+.lc * { box-sizing: border-box; }
+.lc {
+  color: var(--fg-2);
+  background: var(--bg);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  font-feature-settings: "cv01", "ss03", "ss01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
+}
+.lc h1, .lc h2, .lc h3, .lc h4 {
+  color: var(--fg);
+  font-family: var(--font-sans);
+  font-weight: 510;
+  letter-spacing: -0.022em;
+  line-height: 1.05;
+  margin: 0;
+  font-feature-settings: "cv01", "ss03";
+}
+.lc h1 { font-size: 36px; }
+.lc h2 { font-size: 24px; }
+.lc h3 { font-size: 20px; }
+.lc p  { margin: 0; }
+
+.lc .mono { font-family: var(--font-mono); font-feature-settings: normal; }
+/* .serif class kept as an alias for backward-compat with existing JSX — now renders Inter at display weight/tracking, Linear-style. */
+.lc .serif { font-family: var(--font-sans); font-weight: 510; letter-spacing: -0.024em; font-feature-settings: "cv01", "ss03"; }
+
+/* Buttons */
+.lc .btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 32px; padding: 0 12px;
+  border-radius: var(--r-md);
+  font-size: 13px; font-weight: 500;
+  border: 1px solid var(--border-2);
+  background: rgba(255,255,255,0.02);
+  color: var(--fg);
+  cursor: pointer;
+  transition: background 180ms ease-out, border-color 180ms ease-out, color 180ms ease-out;
+  font-family: inherit;
+  letter-spacing: -0.005em;
+}
+.lc .btn:hover { background: rgba(255,255,255,0.05); border-color: var(--border-3); }
+.lc .btn-primary {
+  background: var(--primary);
+  color: var(--primary-ink);
+  border-color: transparent;
+  font-weight: 600;
+}
+.lc .btn-primary:hover { background: var(--primary-hover); }
+.lc .btn-ghost { background: transparent; border-color: transparent; color: var(--fg-2); }
+.lc .btn-ghost:hover { background: rgba(255,255,255,0.04); color: var(--fg); }
+.lc .btn-sm { height: 26px; padding: 0 8px; font-size: 12px; }
+.lc .btn-lg { height: 38px; padding: 0 16px; font-size: 14px; }
+.lc .btn-icon { width: 28px; height: 28px; padding: 0; justify-content: center; }
+
+/* Pills & chips */
+.lc .pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 22px; padding: 0 8px;
+  border-radius: var(--r-pill);
+  font-size: 11.5px; font-weight: 500;
+  border: 1px solid var(--border-2);
+  color: var(--fg-2);
+  background: transparent;
+  white-space: nowrap;
+}
+.lc .pill-primary { color: var(--primary); border-color: var(--primary-line); background: var(--primary-soft); }
+.lc .pill-success { color: var(--success); border-color: oklch(0.72 0.14 155 / 0.35); background: var(--success-soft); }
+.lc .pill-warn    { color: var(--warn); border-color: oklch(0.80 0.13 85 / 0.35); background: var(--warn-soft); }
+.lc .pill-danger  { color: var(--danger); border-color: oklch(0.65 0.22 25 / 0.35); background: var(--danger-soft); }
+
+/* Cards */
+.lc .card {
+  background: rgba(255,255,255,0.015);
+  border: 1px solid var(--border);
+  border-radius: var(--r-lg);
+}
+
+/* Inputs */
+.lc .input, .lc .select {
+  width: 100%; height: 36px;
+  padding: 0 12px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border-2);
+  border-radius: var(--r-md);
+  color: var(--fg);
+  font-family: inherit; font-size: 14px;
+  outline: none;
+  transition: border-color 180ms ease-out, box-shadow 180ms ease-out;
+}
+.lc .input::placeholder { color: var(--fg-4); }
+.lc .input:focus, .lc .select:focus { border-color: var(--primary-line); box-shadow: var(--ring-focus); }
+
+/* Divider */
+.lc .hr { height: 1px; background: var(--border); border: 0; }
+
+/* Table */
+.lc table.t { width: 100%; border-collapse: collapse; }
+.lc table.t th {
+  text-align: left; font-weight: 500; font-size: 12px;
+  color: var(--fg-3); letter-spacing: 0.02em;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.lc table.t td {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13.5px;
+  color: var(--fg-2);
+  vertical-align: middle;
+}
+.lc table.t tr:hover td { background: rgba(255,255,255,0.015); }
+.lc table.t tr:last-child td { border-bottom: 0; }
+
+/* Kbd */
+.lc kbd {
+  font-family: var(--font-mono); font-size: 11px;
+  padding: 1px 5px; border-radius: 4px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid var(--border-2);
+  color: var(--fg-2);
+}
+
+/* Scroll */
+.lc .scroll::-webkit-scrollbar { width: 10px; height: 10px; }
+.lc .scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.06); border-radius: 10px; border: 2px solid transparent; background-clip: padding-box; }
+.lc .scroll::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.1); background-clip: padding-box; border: 2px solid transparent; }
+
+/* Sidebar nav item */
+.lc .nav-item {
+  display: flex; align-items: center; gap: 10px;
+  height: 28px; padding: 0 8px; border-radius: var(--r-sm);
+  color: var(--fg-3); font-size: 13px; font-weight: 500;
+  cursor: pointer; user-select: none;
+  transition: background 150ms ease-out, color 150ms ease-out;
+}
+.lc .nav-item:hover { background: rgba(255,255,255,0.04); color: var(--fg); }
+.lc .nav-item.active { background: rgba(255,255,255,0.06); color: var(--fg); }
+.lc .nav-item.active .nav-icon { color: var(--primary); }
+.lc .nav-icon { width: 16px; height: 16px; display: inline-flex; color: var(--fg-4); flex: 0 0 16px; }
+.lc .nav-item:hover .nav-icon { color: var(--fg-2); }
+
+/* Stat */
+.lc .stat-num {
+  font-family: var(--font-sans); font-weight: 510;
+  font-size: 32px; letter-spacing: -0.028em; color: var(--fg);
+  line-height: 1;
+}
+.lc .stat-num.peach { color: var(--primary); }
+.lc .stat-label { font-size: 11.5px; color: var(--fg-3); text-transform: uppercase; letter-spacing: 0.08em; }
+
+/* Focus ring for keyboard */
+.lc :focus-visible { outline: none; box-shadow: var(--ring-focus); border-radius: var(--r-sm); }
+
+/* Pulsing dot — used by uploading / processing status pills */
+@keyframes wv-pulse {
+  0%, 100% { opacity: 1;    transform: scale(1); }
+  50%      { opacity: 0.55; transform: scale(1.3); }
+}
