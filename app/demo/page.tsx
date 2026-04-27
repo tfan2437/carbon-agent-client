@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 
 import type { GHGGraphData } from "@/lib/types";
 import { Shell, PageHeader } from "@/components/engram/Shell";
@@ -12,7 +13,12 @@ const GHGGraph = dynamic(() => import("@/components/ghg-graph"), {
   loading: () => <DemoGraphLoading />,
 });
 
-const DEMO_CRUMBS: ReactNode[] = ["Demo", "Graph"];
+const DEMO_CRUMBS: ReactNode[] = [
+  <Link key="projects" href="/projects" className="crumb-link">
+    Projects
+  </Link>,
+  "Demo Graph",
+];
 
 const DEMO_HEADER_ACTIONS: ReactNode = (
   <span
@@ -29,7 +35,7 @@ const DEMO_HEADER_ACTIONS: ReactNode = (
 
 function DemoGraphLoading() {
   return (
-    <Shell>
+    <Shell hideSidebar>
       <PageHeader crumbs={DEMO_CRUMBS} actions={DEMO_HEADER_ACTIONS} />
       <div
         style={{
@@ -49,7 +55,7 @@ function DemoGraphLoading() {
 
 function DemoGraphError({ message }: { message: string }) {
   return (
-    <Shell>
+    <Shell hideSidebar>
       <PageHeader crumbs={DEMO_CRUMBS} actions={DEMO_HEADER_ACTIONS} />
       <div
         style={{

@@ -10,21 +10,25 @@ import { Sidebar } from "./Sidebar";
 type ShellProps = {
   children?: React.ReactNode;
   rightRail?: React.ReactNode;
+  // Graph routes (/demo, /projects/[id]/graph) hide the global sidebar so
+  // the canvas can use the full viewport width. The page-header still
+  // renders, providing breadcrumb navigation back to the dashboard.
+  hideSidebar?: boolean;
 };
 
-export const Shell: React.FC<ShellProps> = ({ children, rightRail }) => {
+export const Shell: React.FC<ShellProps> = ({ children, rightRail, hideSidebar }) => {
   const [collapsed, setCollapsed] = React.useState(false);
   const toggle = React.useCallback(() => setCollapsed((c) => !c), []);
 
   return (
     <div className="lc" style={{ display: "flex", height: "100vh", width: "100%", background: "var(--bg)" }}>
-      <Sidebar onToggle={toggle} collapsed={collapsed} />
+      {!hideSidebar && <Sidebar onToggle={toggle} collapsed={collapsed} />}
       <main style={{
         flex: 1, minWidth: 0, height: "100%",
         display: "flex", flexDirection: "column", overflow: "hidden",
         position: "relative",
       }}>
-        {collapsed && (
+        {!hideSidebar && collapsed && (
           <button
             type="button"
             className="btn btn-ghost btn-icon"

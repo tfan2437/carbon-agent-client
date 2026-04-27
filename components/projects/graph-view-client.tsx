@@ -57,7 +57,7 @@ function projectHeaderActions(projectMeta: string): ReactNode {
 // real component mounts.
 function ProjectGraphLoading() {
   return (
-    <Shell>
+    <Shell hideSidebar>
       <PageHeader crumbs={["Graph"]} />
       <div
         style={{
@@ -87,7 +87,7 @@ function GraphChromeStatus({
   headerActions?: ReactNode;
 }) {
   return (
-    <Shell>
+    <Shell hideSidebar>
       <PageHeader crumbs={crumbs} actions={headerActions} />
       <div
         style={{

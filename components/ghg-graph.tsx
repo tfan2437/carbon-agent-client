@@ -434,7 +434,7 @@ export default function GHGGraph({
   // Loading state — same chrome as the resolved view so the page doesn't jump.
   if (!graph) {
     return (
-      <Shell>
+      <Shell hideSidebar>
         <PageHeader crumbs={crumbs} actions={headerActions} />
         <div
           ref={containerRef}
@@ -1312,7 +1312,7 @@ export default function GHGGraph({
   );
 
   return (
-    <Shell>
+    <Shell hideSidebar>
       <PageHeader crumbs={crumbs} actions={headerActions} />
       {chrome}
     </Shell>

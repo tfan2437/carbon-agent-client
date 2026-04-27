@@ -55,7 +55,7 @@ export default async function ProjectGraphPage({
 
   if (!graphRes.data) {
     return (
-      <Shell>
+      <Shell hideSidebar>
         <PageHeader
           crumbs={crumbs}
           actions={
