@@ -9,6 +9,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -34,6 +35,7 @@ import type { GHGGraphData } from "@/lib/types";
 import { Shell, PageHeader } from "@/components/engram/Shell";
 import { Glyph, Icon } from "@/components/engram/Primitives";
 import { useGraphCache } from "@/components/projects/graph-cache-context";
+import { ProjectDeleteButton } from "@/components/projects/project-delete-button";
 import {
   StatusPill,
   type V6Status,
@@ -54,7 +56,7 @@ import {
   type V6GlyphKind,
 } from "@/components/projects/v6-doc-row-helpers";
 
-const PER_PAGE = 9;
+const PER_PAGE = 10;
 const ACCEPT_ATTR = ACCEPTED_EXTS.join(",");
 
 function companyLabel(companyId: string): string {
@@ -501,7 +503,12 @@ export function ProjectDetailClient({
   return (
     <Shell>
       <PageHeader
-        crumbs={["Projects", project.name]}
+        crumbs={[
+          <Link key="projects" href="/projects" className="crumb-link">
+            Projects
+          </Link>,
+          project.name,
+        ]}
         actions={
           <>
             <span
@@ -521,13 +528,11 @@ export function ProjectDetailClient({
                 background: "var(--border)",
               }}
             />
-            <button
-              type="button"
-              className="btn btn-ghost btn-icon"
-              aria-label="More options"
-            >
-              <Icon name="more" size={15} color="var(--fg-3)" />
-            </button>
+            <ProjectDeleteButton
+              projectId={project.id}
+              projectName={project.name}
+              redirectTo="/projects"
+            />
           </>
         }
       />
@@ -584,12 +589,6 @@ export function ProjectDetailClient({
               <h3 className="serif" style={{ fontSize: 16 }}>
                 Documents
               </h3>
-              <span
-                className="mono"
-                style={{ fontSize: 11, color: "var(--fg-4)" }}
-              >
-                {rows.length} total
-              </span>
               <div style={{ flex: 1 }} />
               <StatusFilterButtons
                 filter={filter}
@@ -758,7 +757,10 @@ const DropZone: React.FC<{
   onKeyDown,
   inputRef,
   onInputChange,
-}) => (
+}) => {
+  const [isHover, setIsHover] = useState(false);
+  const active = isDragging || isHover;
+  return (
   <div
     role="button"
     tabIndex={0}
@@ -769,6 +771,8 @@ const DropZone: React.FC<{
     onDragOver={onDragOver}
     onDragLeave={onDragLeave}
     onDrop={onDrop}
+    onMouseEnter={() => setIsHover(true)}
+    onMouseLeave={() => setIsHover(false)}
     style={{
       width: 360,
       height: "100%",
@@ -783,12 +787,13 @@ const DropZone: React.FC<{
       cursor: "pointer",
       borderRadius: 12,
       border: `1.5px dashed ${
-        isDragging ? "var(--primary-line)" : "var(--border-3)"
+        active ? "var(--primary-line)" : "var(--border-3)"
       }`,
-      background: isDragging
-        ? "rgba(222,115,86,0.10)"
+      background: active
+        ? "rgba(180,88,64,0.16)"
         : "linear-gradient(180deg, rgba(222,115,86,0.06), rgba(222,115,86,0.01))",
-      transition: "border-color 150ms ease-out, background 150ms ease-out",
+      transition:
+        "border-color 260ms ease-out, background 260ms ease-out",
     }}
   >
     <svg
@@ -864,7 +869,8 @@ const DropZone: React.FC<{
       onChange={onInputChange}
     />
   </div>
-);
+  );
+};
 
 // ---------- Documents table ----------
 
@@ -954,6 +960,7 @@ const DocumentRow: React.FC<{
     <tr
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
+      style={{ cursor: "default" }}
     >
       <td style={{ ...cell, paddingLeft: 14 }}>
         <div

@@ -2,11 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Trash2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { deleteProject } from "@/lib/ghg/projects";
 import { Button } from "@/components/ui/button";
+import { Icon } from "@/components/engram/Primitives";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -22,11 +23,13 @@ import {
 export interface ProjectDeleteButtonProps {
   projectId: string;
   projectName: string;
+  redirectTo?: string;
 }
 
 export function ProjectDeleteButton({
   projectId,
   projectName,
+  redirectTo,
 }: ProjectDeleteButtonProps) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -38,7 +41,11 @@ export function ProjectDeleteButton({
       await deleteProject(projectId);
       toast.success(`Project "${projectName}" deleted`);
       setOpen(false);
-      router.refresh();
+      if (redirectTo) {
+        router.push(redirectTo);
+      } else {
+        router.refresh();
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Delete failed");
     } finally {
@@ -52,10 +59,10 @@ export function ProjectDeleteButton({
         <Button
           variant="ghost"
           size="icon"
-          className="size-8 text-muted-foreground hover:text-destructive"
+          className="size-8 text-muted-foreground"
           aria-label={`Delete project ${projectName}`}
         >
-          <Trash2 className="size-4" aria-hidden />
+          <Icon name="more" size={15} color="var(--fg-3)" />
         </Button>
       </AlertDialogTrigger>
       <AlertDialogContent>
