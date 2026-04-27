@@ -14,6 +14,8 @@ import {
 } from '@/lib/types';
 import { DEFAULT_THEME, THEMES, THEME_ORDER, ThemeKey } from '@/lib/themes';
 import AnalyticsPanel from '@/components/analytics-panel';
+import { Shell, PageHeader } from '@/components/engram/Shell';
+import { Icon } from '@/components/engram/Primitives';
 
 // Force-graph augments nodes with x/y during simulation; intersect with the
 // discriminated union so per-type narrowing (activity_data etc.) still works.
@@ -85,9 +87,18 @@ function getNodeSize(node: GraphNode, maxEmissions: number, mode: TopologyMode):
 
 export interface GHGGraphProps {
   initialData?: GHGGraphData;
+  // Page-header breadcrumbs. Caller is responsible for shape — strings
+  // and/or <Link className="crumb-link"> children.
+  crumbs: React.ReactNode[];
+  // Optional right-aligned actions in the page header (e.g. company · year).
+  headerActions?: React.ReactNode;
 }
 
-export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
+export default function GHGGraph({
+  initialData,
+  crumbs,
+  headerActions,
+}: GHGGraphProps) {
   const fgRef = useRef<ForceGraphMethods<GraphNode, GraphLink> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
   const zoomRef = useRef(1);
@@ -100,10 +111,11 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
   const [selectedActivityId, setSelectedActivityId] = useState<string | null>(null);
   const [filterPanelOpen, setFilterPanelOpen] = useState(true);
 
-  // Graph payload: either supplied by the parent (project view) or fetched
-  // from /mock-data/graph.json (standalone /demo page).
-  const [graph, setGraph] = useState<GHGGraphData | null>(initialData ?? null);
-  const [graphError, setGraphError] = useState<Error | null>(null);
+  // Graph payload always supplied by the caller now — both /projects/[id]/graph
+  // (via GraphViewClient + Supabase) and /demo (via the page-level fetch) hand
+  // the data in as initialData. Kept as state because filter changes in the
+  // future may want to update it.
+  const [graph] = useState<GHGGraphData | null>(initialData ?? null);
 
   // Filters
   const [selectedYear] = useState(2025);
@@ -123,22 +135,6 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
   // PII gate — unmask toggle is only available when the URL carries `?pii=1`.
   const searchParams = useSearchParams();
   const piiUnlocked = searchParams?.get('pii') === '1';
-
-  useEffect(() => {
-    if (initialData) return;
-    let cancelled = false;
-    fetch('/mock-data/graph.json')
-      .then((r) => {
-        if (!r.ok) throw new Error(`Failed to load graph.json: ${r.status} ${r.statusText}`);
-        return r.json() as Promise<GHGGraphData>;
-      })
-      .then((data) => { if (!cancelled) setGraph(data); })
-      .catch((err: Error) => { if (!cancelled) setGraphError(err); });
-    return () => { cancelled = true; };
-  }, [initialData]);
-
-  // Hard fail — no silent fallback to static data (per CLAUDE.md conventions).
-  if (graphError) throw graphError;
 
   // Stats pulled from meta (top-level summary, already computed by build_graph.py).
   const stats = useMemo(() => ({
@@ -408,33 +404,149 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
   }, []);
 
   // Initial fit — re-run when graph loads so zoomToFit sees real nodes.
+  // For tiny graphs (single facility / single source) zoomToFit zooms in
+  // 6–15× to "fit" the small bounding box, so a maxSize=38 canvas-unit
+  // node + its hover halo ends up filling 50%+ of the viewport. Clamp only
+  // the unreasonably-high case (zoom > 3) — medium / large graphs naturally
+  // fit at 0.5–3× and should keep their auto-fit zoom so they fill the view.
   useEffect(() => {
     if (!graph) return;
     const timer = setTimeout(() => {
-      if (fgRef.current) {
-        fgRef.current.zoomToFit(400, 80);
-      }
+      const fg = fgRef.current;
+      if (!fg) return;
+      fg.zoomToFit(400, 80);
+      const checkTimer = setTimeout(() => {
+        const fg2 = fgRef.current;
+        if (!fg2) return;
+        const k = fg2.zoom();
+        const MAX_INITIAL_ZOOM = 3;
+        if (k > MAX_INITIAL_ZOOM) fg2.zoom(MAX_INITIAL_ZOOM, 300);
+      }, 450);
+      return () => clearTimeout(checkTimer);
     }, 500);
     return () => clearTimeout(timer);
   }, [graph]);
 
+  // Background canvas color must match the .lc surface so the force-graph's
+  // own clear-rect paints onto a token-driven color, not a hardcoded hex.
+  const canvasBg = '#131211';
+
+  // Loading state — same chrome as the resolved view so the page doesn't jump.
   if (!graph) {
     return (
-      <div ref={containerRef} className="w-full h-screen flex items-center justify-center" style={{ backgroundColor: '#0B0E14' }}>
-        <div className="text-gray-400 text-sm">Loading graph data…</div>
-      </div>
+      <Shell>
+        <PageHeader crumbs={crumbs} actions={headerActions} />
+        <div
+          ref={containerRef}
+          style={{
+            flex: 1,
+            minHeight: 0,
+            position: 'relative',
+            background: 'var(--bg)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--fg-3)',
+            fontSize: 13,
+          }}
+        >
+          Loading graph data…
+        </div>
+      </Shell>
     );
   }
 
-  return (
-    <div ref={containerRef} className="relative w-full h-screen overflow-hidden" style={{ backgroundColor: '#0B0E14' }}>
-      {/* Force Graph Canvas */}
+  // Floating-overlay panel chrome shared across the four corner widgets and
+  // the hover tooltip. Mirrors the project's `.card` recipe but slightly
+  // more opaque + backdrop-blurred since these float over a busy canvas.
+  const overlayPanelStyle: React.CSSProperties = {
+    background: 'rgba(20, 16, 14, 0.78)',
+    backdropFilter: 'blur(10px)',
+    WebkitBackdropFilter: 'blur(10px)',
+    border: '1px solid var(--border-2)',
+    borderRadius: 'var(--r-lg)',
+  };
+
+  const sectionLabelStyle: React.CSSProperties = {
+    fontSize: 11,
+    color: 'var(--fg-4)',
+    fontWeight: 500,
+    textTransform: 'uppercase',
+    letterSpacing: '0.08em',
+    display: 'block',
+    marginBottom: 6,
+  };
+
+  const segmentBtnStyle = (active: boolean): React.CSSProperties => ({
+    flex: 1,
+    height: 30,
+    padding: '0 8px',
+    border: `1px solid ${active ? 'var(--primary-line)' : 'var(--border-2)'}`,
+    background: active ? 'var(--primary-soft)' : 'rgba(255,255,255,0.02)',
+    color: active ? 'var(--primary)' : 'var(--fg-2)',
+    borderRadius: 'var(--r-sm)',
+    fontSize: 12,
+    fontWeight: 500,
+    fontFamily: 'inherit',
+    letterSpacing: '-0.005em',
+    cursor: 'pointer',
+    transition:
+      'background 180ms ease-out, border-color 180ms ease-out, color 180ms ease-out',
+  });
+
+  // Scope-tinted toggle (peach for scope-1 since --scope-1 == --primary,
+  // info-blue for scope-2). Off-state matches segmentBtnStyle inactive.
+  const scopeBtnStyle = (
+    active: boolean,
+    scope: 1 | 2,
+  ): React.CSSProperties => {
+    const color = scope === 1 ? 'var(--primary)' : '#6FA4C9';
+    const soft =
+      scope === 1
+        ? 'var(--primary-soft)'
+        : 'rgba(111,164,201,0.15)';
+    const line =
+      scope === 1
+        ? 'var(--primary-line)'
+        : 'rgba(111,164,201,0.40)';
+    return {
+      flex: 1,
+      height: 32,
+      padding: '0 12px',
+      border: `1px solid ${active ? line : 'var(--border-2)'}`,
+      background: active ? soft : 'rgba(255,255,255,0.02)',
+      color: active ? color : 'var(--fg-3)',
+      borderRadius: 'var(--r-md)',
+      fontSize: 12.5,
+      fontWeight: 500,
+      fontFamily: 'inherit',
+      letterSpacing: '-0.005em',
+      cursor: 'pointer',
+      transition:
+        'background 180ms ease-out, border-color 180ms ease-out, color 180ms ease-out',
+    };
+  };
+
+  // Visual chrome — canvas + 4 floating overlays + hover tooltip + analytics
+  // panel. Wrapped in a relative container so absolutely-positioned widgets
+  // resolve against the canvas, not the viewport.
+  const chrome = (
+    <div
+      ref={containerRef}
+      style={{
+        flex: 1,
+        minHeight: 0,
+        position: 'relative',
+        overflow: 'hidden',
+        background: 'var(--bg)',
+      }}
+    >
       <ForceGraph2D
         ref={fgRef}
         graphData={graphData}
         width={dimensions.width}
         height={dimensions.height}
-        backgroundColor="#0B0E14"
+        backgroundColor={canvasBg}
         nodeCanvasObject={paintNode}
         linkCanvasObject={paintLink}
         nodePointerAreaPaint={(node, color, ctx) => {
@@ -469,7 +581,9 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
           setSelectedNode(null);
           setSelectedActivityId(null);
         }}
-        onZoom={({ k }) => { zoomRef.current = k; }}
+        onZoom={({ k }) => {
+          zoomRef.current = k;
+        }}
         d3AlphaDecay={0.02}
         d3VelocityDecay={0.3}
         warmupTicks={100}
@@ -480,84 +594,211 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
         enablePanInteraction={true}
       />
 
-      {/* Hover Tooltip */}
+      {/* Hover Tooltip — center-bottom of canvas, never covers selection */}
       {hoveredNode && !selectedNode && (
         <div
-          className="absolute pointer-events-none z-50"
           style={{
+            position: 'absolute',
             left: '50%',
             bottom: 80,
             transform: 'translateX(-50%)',
+            zIndex: 50,
+            pointerEvents: 'none',
+            ...overlayPanelStyle,
+            padding: '12px 14px',
+            minWidth: 220,
+            maxWidth: 360,
           }}
         >
-          <div className="bg-[#1a1d24]/90 backdrop-blur-md border border-white/10 rounded-lg px-4 py-3 shadow-xl">
-            <div className="text-white font-medium text-sm">{hoveredNode.name}</div>
-            <div className="flex items-center gap-3 mt-2">
-              {(() => {
-                const c = theme.colorFor(hoveredNode as GHGNode);
-                return (
-                  <span className="text-xs px-2 py-0.5 rounded" style={{ backgroundColor: c + '30', color: c }}>
-                    {NODE_TYPE_LABELS[hoveredNode.type].en}
-                  </span>
-                );
-              })()}
-              {hoveredNode.scope && (
-                <span className={`text-xs px-2 py-0.5 rounded ${hoveredNode.scope === 1 ? 'bg-amber-500/20 text-amber-400' : 'bg-blue-500/20 text-blue-400'}`}>
-                  Scope {hoveredNode.scope}
+          <div
+            style={{
+              color: 'var(--fg)',
+              fontWeight: 500,
+              fontSize: 13.5,
+              letterSpacing: '-0.005em',
+            }}
+          >
+            {hoveredNode.name}
+          </div>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              marginTop: 8,
+              flexWrap: 'wrap',
+            }}
+          >
+            {(() => {
+              const c = theme.colorFor(hoveredNode as GHGNode);
+              return (
+                <span
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    padding: '2px 7px',
+                    borderRadius: 'var(--r-pill)',
+                    border: `1px solid ${c}40`,
+                    background: `${c}1f`,
+                    color: c,
+                  }}
+                >
+                  {NODE_TYPE_LABELS[hoveredNode.type].en}
                 </span>
-              )}
-              {nodeEmissions(hoveredNode) > 0 && (
-                <span className="text-gray-300 text-xs">
-                  {formatNumber(nodeEmissions(hoveredNode))} tCO₂e
-                </span>
-              )}
-            </div>
+              );
+            })()}
+            {hoveredNode.scope && (
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 500,
+                  padding: '2px 7px',
+                  borderRadius: 'var(--r-pill)',
+                  border:
+                    hoveredNode.scope === 1
+                      ? '1px solid var(--primary-line)'
+                      : '1px solid rgba(111,164,201,0.40)',
+                  background:
+                    hoveredNode.scope === 1
+                      ? 'var(--primary-soft)'
+                      : 'rgba(111,164,201,0.15)',
+                  color:
+                    hoveredNode.scope === 1
+                      ? 'var(--primary)'
+                      : '#6FA4C9',
+                }}
+              >
+                Scope {hoveredNode.scope}
+              </span>
+            )}
+            {nodeEmissions(hoveredNode) > 0 && (
+              <span
+                className="mono"
+                style={{
+                  fontSize: 12,
+                  color: 'var(--fg-3)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {formatNumber(nodeEmissions(hoveredNode))} tCO₂e
+              </span>
+            )}
           </div>
         </div>
       )}
 
-      {/* Filter Panel - Top Left */}
-      <div className={`absolute top-4 left-4 z-40 transition-all duration-300 ${filterPanelOpen ? 'w-72' : 'w-10'}`}>
-        <div className="bg-[#1a1d24]/80 backdrop-blur-md border border-white/10 rounded-xl overflow-hidden">
-          {/* Panel Header */}
+      {/* Filter Panel — top-left */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 16,
+          left: 16,
+          zIndex: 40,
+          width: filterPanelOpen ? 280 : 38,
+          transition: 'width 200ms ease-out',
+        }}
+      >
+        <div style={{ ...overlayPanelStyle, overflow: 'hidden' }}>
           <button
+            type="button"
             onClick={() => setFilterPanelOpen(!filterPanelOpen)}
-            className="w-full flex items-center justify-between px-4 py-3 text-white hover:bg-white/5 transition-colors"
+            style={{
+              width: '100%',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              height: 38,
+              padding: '0 12px',
+              background: 'transparent',
+              border: 0,
+              color: 'var(--fg-2)',
+              fontSize: 13,
+              fontWeight: 500,
+              fontFamily: 'inherit',
+              letterSpacing: '-0.005em',
+              cursor: 'pointer',
+              transition: 'background 150ms ease-out, color 150ms ease-out',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.04)';
+              e.currentTarget.style.color = 'var(--fg)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--fg-2)';
+            }}
+            aria-expanded={filterPanelOpen}
+            title={filterPanelOpen ? 'Collapse filters' : 'Open filters'}
           >
-            <span className={`font-medium text-sm ${!filterPanelOpen ? 'hidden' : ''}`}>Filters</span>
-            <svg className={`w-4 h-4 transition-transform ${filterPanelOpen ? '' : 'rotate-180'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-            </svg>
+            {filterPanelOpen && <span>Filters</span>}
+            <span
+              style={{
+                display: 'inline-flex',
+                transform: filterPanelOpen ? 'rotate(0deg)' : 'rotate(180deg)',
+                transition: 'transform 180ms ease-out',
+                marginLeft: filterPanelOpen ? 'auto' : 0,
+              }}
+            >
+              <Icon name="chevronLeft" size={14} color="var(--fg-3)" />
+            </span>
           </button>
 
           {filterPanelOpen && (
-            <div className="px-4 pb-4 space-y-4">
+            <div
+              className="scroll"
+              style={{
+                padding: '4px 14px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 14,
+                maxHeight: 'calc(100vh - 140px)',
+                overflowY: 'auto',
+              }}
+            >
               {/* Search */}
               <div>
-                <label className="text-gray-400 text-xs uppercase tracking-wider">Search</label>
+                <label htmlFor="graph-search" style={sectionLabelStyle}>
+                  Search
+                </label>
                 <input
+                  id="graph-search"
+                  className="input"
                   type="text"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search nodes..."
-                  className="mt-1 w-full bg-white/5 border border-white/10 rounded-lg px-3 py-2 text-white text-sm placeholder-gray-500 focus:outline-none focus:border-white/30"
+                  placeholder="Search nodes…"
+                  style={{ height: 32, fontSize: 13 }}
                 />
               </div>
 
               {/* Year + Topology */}
-              <div className="flex gap-2">
-                <div className="flex-1">
-                  <label className="text-gray-400 text-xs uppercase tracking-wider">Year</label>
-                  <button className="mt-1 w-full bg-white/10 text-white text-sm py-2 rounded-lg border border-white/20">
+              <div style={{ display: 'flex', gap: 8 }}>
+                <div style={{ flex: 1 }}>
+                  <span style={sectionLabelStyle}>Year</span>
+                  <button
+                    type="button"
+                    style={segmentBtnStyle(true)}
+                    aria-disabled
+                  >
                     {selectedYear}
                   </button>
                 </div>
-                <div className="flex-1">
-                  <label className="text-gray-400 text-xs uppercase tracking-wider">View</label>
+                <div style={{ flex: 1 }}>
+                  <span style={sectionLabelStyle}>View</span>
                   <button
-                    onClick={() => setTopologyMode((m) => (m === 'macro' ? 'expanded' : 'macro'))}
-                    className="mt-1 w-full bg-white/5 hover:bg-white/10 text-white text-sm py-2 rounded-lg border border-white/10 transition-colors"
-                    title={topologyMode === 'macro' ? '展開所有節點 (~700)' : '回到精簡視圖 (~32 nodes)'}
+                    type="button"
+                    onClick={() =>
+                      setTopologyMode((m) =>
+                        m === 'macro' ? 'expanded' : 'macro',
+                      )
+                    }
+                    style={segmentBtnStyle(false)}
+                    title={
+                      topologyMode === 'macro'
+                        ? '展開所有節點 (~700)'
+                        : '回到精簡視圖 (~32 nodes)'
+                    }
                   >
                     {topologyMode === 'macro' ? '精簡' : '展開'}
                   </button>
@@ -566,17 +807,24 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
 
               {/* Theme picker */}
               <div>
-                <label className="text-gray-400 text-xs uppercase tracking-wider">Theme</label>
-                <div className="mt-2 grid grid-cols-3 gap-1">
+                <span style={sectionLabelStyle}>Theme</span>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: 6,
+                  }}
+                >
                   {THEME_ORDER.map((key) => {
                     const t = THEMES[key];
                     const active = themeKey === key;
                     return (
                       <button
                         key={key}
+                        type="button"
                         onClick={() => setThemeKey(key)}
                         title={`${t.englishName} — ${t.description}`}
-                        className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border ${active ? 'bg-white/10 text-white border-white/20' : 'bg-white/5 text-gray-500 border-white/5 hover:text-gray-300'}`}
+                        style={segmentBtnStyle(active)}
                       >
                         {t.name}
                       </button>
@@ -587,17 +835,25 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
 
               {/* Scope Toggles */}
               <div>
-                <label className="text-gray-400 text-xs uppercase tracking-wider">Scopes</label>
-                <div className="mt-2 flex gap-2">
+                <span style={sectionLabelStyle}>Scopes</span>
+                <div style={{ display: 'flex', gap: 8 }}>
                   <button
-                    onClick={() => setScopeFilter(f => ({ ...f, scope1: !f.scope1 }))}
-                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${scopeFilter.scope1 ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40' : 'bg-white/5 text-gray-500 border border-white/10'}`}
+                    type="button"
+                    onClick={() =>
+                      setScopeFilter((f) => ({ ...f, scope1: !f.scope1 }))
+                    }
+                    style={scopeBtnStyle(scopeFilter.scope1, 1)}
+                    aria-pressed={scopeFilter.scope1}
                   >
                     Scope 1
                   </button>
                   <button
-                    onClick={() => setScopeFilter(f => ({ ...f, scope2: !f.scope2 }))}
-                    className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${scopeFilter.scope2 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/40' : 'bg-white/5 text-gray-500 border border-white/10'}`}
+                    type="button"
+                    onClick={() =>
+                      setScopeFilter((f) => ({ ...f, scope2: !f.scope2 }))
+                    }
+                    style={scopeBtnStyle(scopeFilter.scope2, 2)}
+                    aria-pressed={scopeFilter.scope2}
                   >
                     Scope 2
                   </button>
@@ -606,27 +862,69 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
 
               {/* Facilities */}
               <div>
-                <label className="text-gray-400 text-xs uppercase tracking-wider">Facilities</label>
-                <div className="mt-2 space-y-1">
-                  {facilities.map(facility => (
-                    <button
-                      key={facility.id}
-                      onClick={() => {
-                        setSelectedFacilities(prev =>
-                          prev.includes(facility.id)
-                            ? prev.filter(id => id !== facility.id)
-                            : [...prev, facility.id]
-                        );
-                      }}
-                      className={`w-full text-left px-3 py-2 rounded-lg text-sm transition-colors ${selectedFacilities.includes(facility.id) ? 'bg-white/10 text-white' : 'text-gray-400 hover:bg-white/5'}`}
-                    >
-                      {facility.name}
-                    </button>
-                  ))}
+                <span style={sectionLabelStyle}>Facilities</span>
+                <div
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 2,
+                  }}
+                >
+                  {facilities.map((facility) => {
+                    const active = selectedFacilities.includes(facility.id);
+                    return (
+                      <button
+                        key={facility.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedFacilities((prev) =>
+                            prev.includes(facility.id)
+                              ? prev.filter((id) => id !== facility.id)
+                              : [...prev, facility.id],
+                          );
+                        }}
+                        className={'nav-item' + (active ? ' active' : '')}
+                        style={{
+                          width: '100%',
+                          textAlign: 'left',
+                          height: 28,
+                          padding: '0 10px',
+                          border: 0,
+                          background: active
+                            ? 'rgba(255,255,255,0.06)'
+                            : 'transparent',
+                          color: active ? 'var(--fg)' : 'var(--fg-3)',
+                          fontFamily: 'inherit',
+                          fontSize: 13,
+                          fontWeight: 500,
+                          cursor: 'pointer',
+                          borderRadius: 'var(--r-sm)',
+                          letterSpacing: '-0.005em',
+                          transition:
+                            'background 150ms ease-out, color 150ms ease-out',
+                        }}
+                      >
+                        {facility.name}
+                      </button>
+                    );
+                  })}
                   {selectedFacilities.length > 0 && (
                     <button
+                      type="button"
                       onClick={() => setSelectedFacilities([])}
-                      className="w-full text-center text-xs text-gray-500 hover:text-gray-400 mt-2"
+                      style={{
+                        marginTop: 4,
+                        height: 26,
+                        background: 'transparent',
+                        border: 0,
+                        color: 'var(--fg-4)',
+                        fontSize: 11.5,
+                        fontFamily: 'inherit',
+                        cursor: 'pointer',
+                        textAlign: 'center',
+                        textDecoration: 'underline',
+                        textUnderlineOffset: 2,
+                      }}
                     >
                       Clear selection
                     </button>
@@ -636,13 +934,20 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
 
               {/* Source Type */}
               <div>
-                <label className="text-gray-400 text-xs uppercase tracking-wider">Source Type</label>
-                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                <span style={sectionLabelStyle}>Source Type</span>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: 6,
+                  }}
+                >
                   {ALL_SOURCE_TYPES.map((st) => {
                     const active = sourceTypeFilter.has(st);
                     return (
                       <button
                         key={st}
+                        type="button"
                         onClick={() => {
                           setSourceTypeFilter((prev) => {
                             const next = new Set(prev);
@@ -651,7 +956,7 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
                             return next;
                           });
                         }}
-                        className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border ${active ? 'bg-white/10 text-white border-white/20' : 'bg-white/5 text-gray-500 border-white/5'}`}
+                        style={segmentBtnStyle(active)}
                       >
                         {SOURCE_TYPE_LABELS[st]}
                       </button>
@@ -662,13 +967,20 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
 
               {/* Emission Type */}
               <div>
-                <label className="text-gray-400 text-xs uppercase tracking-wider">Emission Type</label>
-                <div className="mt-2 grid grid-cols-2 gap-1.5">
+                <span style={sectionLabelStyle}>Emission Type</span>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: 6,
+                  }}
+                >
                   {ALL_EMISSION_TYPES.map((et) => {
                     const active = emissionTypeFilter.has(et);
                     return (
                       <button
                         key={et}
+                        type="button"
                         onClick={() => {
                           setEmissionTypeFilter((prev) => {
                             const next = new Set(prev);
@@ -677,7 +989,7 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
                             return next;
                           });
                         }}
-                        className={`px-2 py-1.5 rounded-lg text-xs font-medium transition-colors border ${active ? 'bg-white/10 text-white border-white/20' : 'bg-white/5 text-gray-500 border-white/5'}`}
+                        style={segmentBtnStyle(active)}
                       >
                         {EMISSION_TYPE_LABELS[et].zh}
                       </button>
@@ -690,30 +1002,130 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
         </div>
       </div>
 
-      {/* Top Stats Strip — sticky */}
-      <div className="absolute top-4 right-4 z-40 flex items-center gap-3">
-        <div className="bg-[#1a1d24]/85 backdrop-blur-md border border-white/10 rounded-xl px-5 py-3 flex items-center gap-6">
+      {/* Top Stats Strip — top-right */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 16,
+          right: 16,
+          zIndex: 40,
+        }}
+      >
+        <div
+          style={{
+            ...overlayPanelStyle,
+            padding: '12px 18px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 22,
+          }}
+        >
           <div>
-            <div className="text-gray-400 text-[10px] uppercase tracking-wider">Total Emissions ({selectedYear})</div>
-            <div className="text-white text-xl font-semibold leading-tight">
-              {formatNumber(stats.total)} <span className="text-xs text-gray-400">tCO₂e</span>
+            <div style={sectionLabelStyle}>
+              Total Emissions ({selectedYear})
+            </div>
+            <div
+              className="stat-num peach"
+              style={{
+                fontSize: 22,
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {formatNumber(stats.total)}{' '}
+              <span
+                style={{
+                  fontSize: 11,
+                  color: 'var(--fg-4)',
+                  fontWeight: 500,
+                  letterSpacing: 0,
+                }}
+              >
+                tCO₂e
+              </span>
             </div>
           </div>
-          <div className="h-8 w-px bg-white/10" />
-          <div className="flex flex-col gap-0.5">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="w-2 h-2 rounded-full bg-amber-500" />
-              <span className="text-gray-400">Scope 1</span>
-              <span className="text-white tabular-nums">{formatNumber(stats.scope1)}</span>
+          <div
+            style={{
+              width: 1,
+              height: 36,
+              background: 'var(--border)',
+            }}
+          />
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 4,
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 12,
+              }}
+            >
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: 'var(--primary)',
+                }}
+              />
+              <span style={{ color: 'var(--fg-3)' }}>Scope 1</span>
+              <span
+                className="mono"
+                style={{
+                  color: 'var(--fg)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {formatNumber(stats.scope1)}
+              </span>
             </div>
-            <div className="flex items-center gap-2 text-xs">
-              <span className="w-2 h-2 rounded-full bg-blue-500" />
-              <span className="text-gray-400">Scope 2</span>
-              <span className="text-white tabular-nums">{formatNumber(stats.scope2)}</span>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                fontSize: 12,
+              }}
+            >
+              <span
+                style={{
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: '#6FA4C9',
+                }}
+              />
+              <span style={{ color: 'var(--fg-3)' }}>Scope 2</span>
+              <span
+                className="mono"
+                style={{
+                  color: 'var(--fg)',
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                {formatNumber(stats.scope2)}
+              </span>
             </div>
           </div>
-          <div className="h-8 w-px bg-white/10" />
-          <div className="flex gap-4 text-xs">
+          <div
+            style={{
+              width: 1,
+              height: 36,
+              background: 'var(--border)',
+            }}
+          />
+          <div
+            style={{
+              display: 'flex',
+              gap: 18,
+            }}
+          >
             <Stat label="場站" value={graph.meta.facility_count} />
             <Stat label="排放源" value={graph.meta.emission_source_count} />
             <Stat label="活動紀錄" value={graph.meta.record_count} />
@@ -729,69 +1141,208 @@ export default function GHGGraph({ initialData }: GHGGraphProps = {}) {
         selectedActivityId={selectedActivityId}
         piiUnlocked={piiUnlocked}
         theme={theme}
-        onSelectNode={(n) => { setSelectedNode(n); setSelectedActivityId(null); }}
+        onSelectNode={(n) => {
+          setSelectedNode(n);
+          setSelectedActivityId(null);
+        }}
         onSelectActivity={setSelectedActivityId}
-        onClose={() => { setSelectedNode(null); setSelectedActivityId(null); }}
+        onClose={() => {
+          setSelectedNode(null);
+          setSelectedActivityId(null);
+        }}
       />
 
-
-      {/* Zoom Controls - Bottom Right */}
-      <div className="absolute bottom-4 right-4 z-40">
-        <div className="bg-[#1a1d24]/80 backdrop-blur-md border border-white/10 rounded-xl overflow-hidden flex flex-col">
+      {/* Zoom Controls — bottom-right */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 16,
+          right: 16,
+          zIndex: 40,
+        }}
+      >
+        <div
+          style={{
+            ...overlayPanelStyle,
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+          }}
+        >
           <button
+            type="button"
             onClick={() => fgRef.current?.zoom(zoomRef.current * 1.5, 300)}
-            className="px-4 py-3 text-white hover:bg-white/10 transition-colors border-b border-white/10"
+            title="Zoom in"
+            aria-label="Zoom in"
+            style={{
+              width: 38,
+              height: 36,
+              padding: 0,
+              border: 0,
+              borderBottom: '1px solid var(--border)',
+              background: 'transparent',
+              color: 'var(--fg-2)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'background 150ms ease-out, color 150ms ease-out',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+              e.currentTarget.style.color = 'var(--fg)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--fg-2)';
+            }}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v12m6-6H6" />
-            </svg>
+            <Icon name="zoom" size={15} />
           </button>
           <button
+            type="button"
             onClick={() => fgRef.current?.zoom(zoomRef.current / 1.5, 300)}
-            className="px-4 py-3 text-white hover:bg-white/10 transition-colors border-b border-white/10"
+            title="Zoom out"
+            aria-label="Zoom out"
+            style={{
+              width: 38,
+              height: 36,
+              padding: 0,
+              border: 0,
+              borderBottom: '1px solid var(--border)',
+              background: 'transparent',
+              color: 'var(--fg-2)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'background 150ms ease-out, color 150ms ease-out',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+              e.currentTarget.style.color = 'var(--fg)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--fg-2)';
+            }}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 12H6" />
-            </svg>
+            <Icon name="zoomOut" size={15} />
           </button>
           <button
+            type="button"
             onClick={resetView}
-            className="px-4 py-3 text-white hover:bg-white/10 transition-colors"
             title="Reset view"
+            aria-label="Reset view"
+            style={{
+              width: 38,
+              height: 36,
+              padding: 0,
+              border: 0,
+              background: 'transparent',
+              color: 'var(--fg-2)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'background 150ms ease-out, color 150ms ease-out',
+            }}
+            onMouseEnter={(e) => {
+              e.currentTarget.style.background = 'rgba(255,255,255,0.05)';
+              e.currentTarget.style.color = 'var(--fg)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+              e.currentTarget.style.color = 'var(--fg-2)';
+            }}
           >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 8V4m0 0h4M4 4l5 5m11-1V4m0 0h-4m4 0l-5 5M4 16v4m0 0h4m-4 0l5-5m11 5l-5-5m5 5v-4m0 4h-4" />
-            </svg>
+            <Icon name="cycle" size={15} />
           </button>
         </div>
       </div>
 
-      {/* Legend - Bottom Left */}
-      <div className="absolute bottom-4 left-4 z-40">
-        <div className="bg-[#1a1d24]/80 backdrop-blur-md border border-white/10 rounded-xl px-3 py-2">
-          <div className="flex items-center gap-4 text-xs">
-            <span className="text-gray-500 text-[10px] uppercase tracking-wider">{theme.englishName}</span>
-            {theme.legend.map((entry) => (
-              <div key={entry.label} className="flex items-center gap-2" title={entry.hint}>
-                <span
-                  className="w-3 h-3 rounded-full"
-                  style={{ backgroundColor: entry.color }}
-                />
-                <span className="text-gray-300">{entry.label}</span>
-              </div>
-            ))}
-          </div>
+      {/* Legend — bottom-left */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: 16,
+          left: 16,
+          zIndex: 40,
+        }}
+      >
+        <div
+          style={{
+            ...overlayPanelStyle,
+            padding: '8px 14px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 16,
+          }}
+        >
+          <span style={{ ...sectionLabelStyle, marginBottom: 0 }}>
+            {theme.englishName}
+          </span>
+          {theme.legend.map((entry) => (
+            <div
+              key={entry.label}
+              title={entry.hint}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 7,
+                fontSize: 12,
+                color: 'var(--fg-2)',
+              }}
+            >
+              <span
+                style={{
+                  width: 9,
+                  height: 9,
+                  borderRadius: '50%',
+                  background: entry.color,
+                  border: `1px solid ${entry.color}66`,
+                }}
+              />
+              <span>{entry.label}</span>
+            </div>
+          ))}
         </div>
       </div>
     </div>
+  );
+
+  return (
+    <Shell>
+      <PageHeader crumbs={crumbs} actions={headerActions} />
+      {chrome}
+    </Shell>
   );
 }
 
 function Stat({ label, value }: { label: string; value: number }) {
   return (
-    <div className="flex flex-col">
-      <span className="text-gray-400 text-[10px] uppercase tracking-wider">{label}</span>
-      <span className="text-white tabular-nums">{value.toLocaleString()}</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+      <span
+        style={{
+          fontSize: 10.5,
+          color: 'var(--fg-4)',
+          fontWeight: 500,
+          textTransform: 'uppercase',
+          letterSpacing: '0.08em',
+        }}
+      >
+        {label}
+      </span>
+      <span
+        className="mono"
+        style={{
+          fontSize: 12.5,
+          color: 'var(--fg)',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {value.toLocaleString()}
+      </span>
     </div>
   );
 }

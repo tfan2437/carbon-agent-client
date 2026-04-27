@@ -1,39 +1,139 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 
 import { createClient } from "@/lib/supabase/client";
 import type { GHGGraphData } from "@/lib/types";
 import { useGraphCache } from "@/components/projects/graph-cache-context";
+import { Shell, PageHeader } from "@/components/engram/Shell";
+import { Icon } from "@/components/engram/Primitives";
 
 const GHGGraph = dynamic(() => import("@/components/ghg-graph"), {
   ssr: false,
-  loading: () => <GraphLoading />,
+  loading: () => <ProjectGraphLoading />,
 });
-
-function GraphLoading({ label = "Loading graph..." }: { label?: string }) {
-  return (
-    <div
-      className="w-full h-screen flex items-center justify-center"
-      style={{ backgroundColor: "#0B0E14" }}
-    >
-      <div className="text-gray-400 text-sm">{label}</div>
-    </div>
-  );
-}
 
 export interface GraphViewClientProps {
   projectId: string;
+  projectName: string;
+  projectMeta: string;
 }
 
-export function GraphViewClient({ projectId }: GraphViewClientProps) {
+function projectCrumbs(projectId: string, projectName: string): ReactNode[] {
+  return [
+    <Link key="projects" href="/projects" className="crumb-link">
+      Projects
+    </Link>,
+    <Link
+      key="project"
+      href={`/projects/${projectId}`}
+      className="crumb-link"
+    >
+      {projectName}
+    </Link>,
+    "Graph",
+  ];
+}
+
+function projectHeaderActions(projectMeta: string): ReactNode {
+  return (
+    <span
+      className="mono"
+      style={{
+        fontSize: 11.5,
+        color: "var(--fg-4)",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {projectMeta}
+    </span>
+  );
+}
+
+// Loading fallback used during the dynamic-import window. Project context
+// isn't in scope here, so the breadcrumbs collapse to "Graph" until the
+// real component mounts.
+function ProjectGraphLoading() {
+  return (
+    <Shell>
+      <PageHeader crumbs={["Graph"]} />
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: "var(--fg-3)",
+          fontSize: 13,
+        }}
+      >
+        Loading graph…
+      </div>
+    </Shell>
+  );
+}
+
+function GraphChromeStatus({
+  label,
+  isError = false,
+  crumbs,
+  headerActions,
+}: {
+  label: string;
+  isError?: boolean;
+  crumbs: ReactNode[];
+  headerActions?: ReactNode;
+}) {
+  return (
+    <Shell>
+      <PageHeader crumbs={crumbs} actions={headerActions} />
+      <div
+        style={{
+          flex: 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            color: isError ? "#E58971" : "var(--fg-3)",
+            fontSize: 13,
+          }}
+        >
+          {isError && <Icon name="alert" size={14} color="#E58971" />}
+          {label}
+        </div>
+      </div>
+    </Shell>
+  );
+}
+
+export function GraphViewClient({
+  projectId,
+  projectName,
+  projectMeta,
+}: GraphViewClientProps) {
   const supabase = useMemo(() => createClient(), []);
   const cache = useGraphCache();
   const [data, setData] = useState<GHGGraphData | null>(() =>
     cache.get(projectId),
   );
   const [error, setError] = useState<string | null>(null);
+
+  const crumbs = useMemo(
+    () => projectCrumbs(projectId, projectName),
+    [projectId, projectName],
+  );
+  const headerActions = useMemo(
+    () => projectHeaderActions(projectMeta),
+    [projectMeta],
+  );
 
   useEffect(() => {
     if (data) return;
@@ -65,10 +165,29 @@ export function GraphViewClient({ projectId }: GraphViewClientProps) {
   }, [data, supabase, projectId, cache]);
 
   if (error) {
-    return <GraphLoading label={`Failed to load graph: ${error}`} />;
+    return (
+      <GraphChromeStatus
+        label={`Failed to load graph: ${error}`}
+        isError
+        crumbs={crumbs}
+        headerActions={headerActions}
+      />
+    );
   }
   if (!data) {
-    return <GraphLoading />;
+    return (
+      <GraphChromeStatus
+        label="Loading graph…"
+        crumbs={crumbs}
+        headerActions={headerActions}
+      />
+    );
   }
-  return <GHGGraph initialData={data} />;
+  return (
+    <GHGGraph
+      initialData={data}
+      crumbs={crumbs}
+      headerActions={headerActions}
+    />
+  );
 }

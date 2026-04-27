@@ -9,6 +9,7 @@ import {
   NODE_TYPE_LABELS,
 } from '@/lib/types';
 import type { Theme } from '@/lib/themes';
+import { Icon } from '@/components/engram/Primitives';
 import { PiiContext } from './pii-context';
 import { PiiToggle } from './pii-toggle';
 import { OverviewTab } from './tabs/overview';
@@ -133,95 +134,277 @@ export default function AnalyticsPanel({
   const emissions =
     'emissions_tco2e' in headerNode ? headerNode.emissions_tco2e : null;
 
+  const scopePill = (scope: 1 | 2) => {
+    const isOne = scope === 1;
+    return {
+      fontSize: 11,
+      fontWeight: 500,
+      padding: '2px 7px',
+      borderRadius: 9999,
+      border: isOne
+        ? '1px solid var(--primary-line)'
+        : '1px solid rgba(111,164,201,0.40)',
+      background: isOne ? 'var(--primary-soft)' : 'rgba(111,164,201,0.15)',
+      color: isOne ? 'var(--primary)' : '#6FA4C9',
+    } as const;
+  };
+
   return (
     <PiiContext.Provider value={{ unlocked: piiUnlocked, unmasked: piiUnmasked }}>
-      <aside className="absolute top-4 bottom-4 right-4 z-40 w-[480px] bg-[#0F1218]/95 backdrop-blur-md border border-white/10 rounded-2xl shadow-2xl flex flex-col overflow-hidden">
+      <aside
+        style={{
+          position: 'absolute',
+          top: 16,
+          bottom: 16,
+          right: 16,
+          width: 480,
+          zIndex: 40,
+          background: 'rgba(20, 16, 14, 0.85)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          border: '1px solid var(--border-2)',
+          borderRadius: 'var(--r-lg)',
+          boxShadow:
+            '0 1px 0 0 rgba(0,0,0,0.05), 0 12px 32px -8px rgba(0,0,0,0.5)',
+          display: 'flex',
+          flexDirection: 'column',
+          overflow: 'hidden',
+        }}
+      >
         {/* Header */}
-        <div className="px-5 py-4 border-b border-white/10">
-          <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0 flex-1">
+        <div
+          style={{
+            padding: '14px 18px 0',
+            borderBottom: '1px solid var(--border)',
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              justifyContent: 'space-between',
+              gap: 10,
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0 }}>
               {breadcrumb && (
-                <div className="text-[11px] text-gray-500 mb-1 truncate">
+                <div
+                  style={{
+                    fontSize: 11,
+                    color: 'var(--fg-4)',
+                    marginBottom: 4,
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
                   {graph.meta.company_name}
-                  {breadcrumb.facility && <> · <span className="text-gray-400">{breadcrumb.facility.name}</span></>}
-                  {breadcrumb.es && <> · <span className="text-gray-400">{breadcrumb.es.name}</span></>}
+                  {breadcrumb.facility && (
+                    <>
+                      {' · '}
+                      <span style={{ color: 'var(--fg-3)' }}>
+                        {breadcrumb.facility.name}
+                      </span>
+                    </>
+                  )}
+                  {breadcrumb.es && (
+                    <>
+                      {' · '}
+                      <span style={{ color: 'var(--fg-3)' }}>
+                        {breadcrumb.es.name}
+                      </span>
+                    </>
+                  )}
                   {' · '}
-                  <span className="text-white">{selectedActivity?.period_label}</span>
+                  <span style={{ color: 'var(--fg)' }}>
+                    {selectedActivity?.period_label}
+                  </span>
                 </div>
               )}
-              <h2 className="text-white font-semibold text-base truncate">
-                {breadcrumb && selectedActivity ? selectedActivity.name : headerNode.name}
+              <h2
+                className="serif"
+                style={{
+                  fontSize: 16,
+                  color: 'var(--fg)',
+                  margin: 0,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {breadcrumb && selectedActivity
+                  ? selectedActivity.name
+                  : headerNode.name}
               </h2>
-              <div className="flex items-center gap-2 mt-1.5 flex-wrap">
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  marginTop: 8,
+                  flexWrap: 'wrap',
+                }}
+              >
                 <span
-                  className="text-[10px] px-1.5 py-0.5 rounded font-medium"
-                  style={{ backgroundColor: `${color}30`, color }}
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 500,
+                    padding: '2px 7px',
+                    borderRadius: 9999,
+                    border: `1px solid ${color}40`,
+                    background: `${color}1f`,
+                    color,
+                  }}
                 >
                   {typeLabel.zh} · {typeLabel.en}
                 </span>
                 {selectedActivity && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-300">
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 500,
+                      padding: '2px 7px',
+                      borderRadius: 9999,
+                      border: '1px solid var(--border-2)',
+                      background: 'rgba(255,255,255,0.04)',
+                      color: 'var(--fg-3)',
+                    }}
+                  >
                     {selectedActivity.source_type}
                   </span>
                 )}
                 {headerNode.type === 'emission_source' && (
-                  <span className="text-[10px] px-1.5 py-0.5 rounded bg-white/5 text-gray-300">
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 500,
+                      padding: '2px 7px',
+                      borderRadius: 9999,
+                      border: '1px solid var(--border-2)',
+                      background: 'rgba(255,255,255,0.04)',
+                      color: 'var(--fg-3)',
+                    }}
+                  >
                     {EMISSION_TYPE_LABELS[headerNode.emission_type].zh}
                   </span>
                 )}
                 {(headerNode.scope === 1 || headerNode.scope === 2) && (
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                      headerNode.scope === 1
-                        ? 'bg-amber-500/20 text-amber-400'
-                        : 'bg-blue-500/20 text-blue-400'
-                    }`}
-                  >
+                  <span style={scopePill(headerNode.scope)}>
                     Scope {headerNode.scope}
                   </span>
                 )}
                 {emissions !== null && emissions > 0 && (
-                  <span className="text-[11px] text-gray-400 ml-1">
-                    {emissions.toLocaleString(undefined, { maximumFractionDigits: 4 })} tCO₂e
+                  <span
+                    className="mono"
+                    style={{
+                      fontSize: 11.5,
+                      color: 'var(--fg-3)',
+                      marginLeft: 2,
+                      fontVariantNumeric: 'tabular-nums',
+                    }}
+                  >
+                    {emissions.toLocaleString(undefined, {
+                      maximumFractionDigits: 4,
+                    })}{' '}
+                    tCO₂e
                   </span>
                 )}
               </div>
             </div>
-            <div className="flex items-center gap-2">
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                flexShrink: 0,
+              }}
+            >
               <PiiToggle unmasked={piiUnmasked} onChange={setPiiUnmasked} />
               <button
+                type="button"
                 onClick={onClose}
-                className="text-gray-400 hover:text-white p-1"
                 title="關閉 (Esc)"
+                aria-label="Close"
+                className="btn btn-ghost btn-icon"
               >
-                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <Icon name="x" size={14} color="var(--fg-3)" />
               </button>
             </div>
           </div>
 
-          {/* Tab strip */}
-          <div className="mt-3 flex gap-1 border-b border-white/5 -mx-5 px-5">
-            {tabs.map((t) => (
-              <button
-                key={t}
-                onClick={() => setActiveTab(t)}
-                className={[
-                  'px-3 py-1.5 text-xs font-medium border-b-2 -mb-px transition-colors',
-                  activeTab === t
-                    ? 'border-white text-white'
-                    : 'border-transparent text-gray-400 hover:text-gray-200',
-                ].join(' ')}
-              >
-                {TAB_LABELS[t]}
-              </button>
-            ))}
+          {/* Tab strip — flush with header bottom border, underline-active */}
+          <div
+            style={{
+              marginTop: 12,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 2,
+              marginLeft: -18,
+              marginRight: -18,
+              paddingLeft: 18,
+              paddingRight: 18,
+            }}
+          >
+            {tabs.map((t) => {
+              const active = activeTab === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => setActiveTab(t)}
+                  role="tab"
+                  aria-selected={active}
+                  style={{
+                    padding: '8px 12px',
+                    border: 0,
+                    borderBottom: active
+                      ? '2px solid var(--primary)'
+                      : '2px solid transparent',
+                    marginBottom: -1,
+                    background: 'transparent',
+                    color: active ? 'var(--fg)' : 'var(--fg-3)',
+                    fontSize: 12.5,
+                    fontWeight: 500,
+                    fontFamily: 'inherit',
+                    letterSpacing: '-0.005em',
+                    cursor: 'pointer',
+                    transition: 'color 150ms ease-out',
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!active) e.currentTarget.style.color = 'var(--fg-2)';
+                  }}
+                  onMouseLeave={(e) => {
+                    if (!active) e.currentTarget.style.color = 'var(--fg-3)';
+                  }}
+                >
+                  {TAB_LABELS[t]}
+                </button>
+              );
+            })}
             {selectedActivity && (
               <button
+                type="button"
                 onClick={() => onSelectActivity(null)}
-                className="ml-auto self-center text-[11px] text-gray-500 hover:text-gray-300"
                 title="返回上層"
+                style={{
+                  marginLeft: 'auto',
+                  marginBottom: -1,
+                  alignSelf: 'center',
+                  border: 0,
+                  background: 'transparent',
+                  color: 'var(--fg-4)',
+                  fontSize: 11,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  padding: '6px 8px',
+                  transition: 'color 150ms ease-out',
+                }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.color = 'var(--fg-2)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.color = 'var(--fg-4)';
+                }}
               >
                 ← 返回排放源
               </button>
@@ -230,7 +413,10 @@ export default function AnalyticsPanel({
         </div>
 
         {/* Tab body */}
-        <div className="flex-1 overflow-y-auto">
+        <div
+          className="scroll"
+          style={{ flex: 1, overflowY: 'auto' }}
+        >
           {activeTab === 'overview' && (
             <OverviewTab
               node={selectedActivity ?? selectedNode!}

@@ -16,20 +16,52 @@ export function PiiToggle({ unmasked, onChange }: Props) {
     : unmasked
       ? '點擊隱藏個資 (車牌 / 員工姓名 / 駕駛資料)'
       : '點擊顯示個資 (僅授權檢視)';
+
+  // Tones: locked → muted disabled, locked-but-masked → neutral pill,
+  // unmasked → cream warm-warning to flag PII is visible.
+  let style: React.CSSProperties;
+  if (disabled) {
+    style = {
+      background: 'rgba(255,255,255,0.03)',
+      color: 'var(--fg-4)',
+      border: '1px solid var(--border)',
+      cursor: 'not-allowed',
+    };
+  } else if (unmasked) {
+    style = {
+      background: 'var(--cream-soft)',
+      color: 'var(--cream)',
+      border: '1px solid oklch(0.95 0.04 85 / 0.30)',
+      cursor: 'pointer',
+    };
+  } else {
+    style = {
+      background: 'rgba(255,255,255,0.04)',
+      color: 'var(--fg-2)',
+      border: '1px solid var(--border-2)',
+      cursor: 'pointer',
+    };
+  }
+
   return (
     <button
       type="button"
       disabled={disabled}
       onClick={() => onChange(!unmasked)}
       title={tooltip}
-      className={[
-        'text-[10px] px-2 py-1 rounded-md border transition-colors',
-        disabled
-          ? 'bg-white/5 text-gray-600 border-white/5 cursor-not-allowed'
-          : unmasked
-            ? 'bg-amber-500/20 text-amber-400 border-amber-500/40'
-            : 'bg-white/5 text-gray-300 border-white/10 hover:bg-white/10',
-      ].join(' ')}
+      style={{
+        ...style,
+        height: 24,
+        padding: '0 8px',
+        borderRadius: 'var(--r-pill)',
+        fontSize: 10.5,
+        fontWeight: 500,
+        fontFamily: 'inherit',
+        letterSpacing: '-0.005em',
+        whiteSpace: 'nowrap',
+        transition:
+          'background 150ms ease-out, color 150ms ease-out, border-color 150ms ease-out',
+      }}
     >
       {label}
     </button>
