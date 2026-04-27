@@ -38,6 +38,7 @@ export const ACCEPTED_MIME = [
 ] as const;
 
 export const MAX_FILE_SIZE = 50 * 1024 * 1024; // 50 MB
+export const MIN_FILE_SIZE = 1; // reject 0-byte files (would all dedup to the well-known empty SHA-256)
 
 export const UPLOAD_CONCURRENCY = 3;
 

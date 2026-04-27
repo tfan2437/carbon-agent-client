@@ -3,6 +3,7 @@ import type { Document } from "@/lib/domain/ghg";
 
 export type UploadPhase =
   | "queued"
+  | "hashing"
   | "uploading"
   | "inserting"
   | "done"
@@ -19,6 +20,12 @@ export interface UploadProgress {
 
 export type UploadProgressHandler = (p: UploadProgress) => void;
 
+export interface UploadItem {
+  file: File;
+  contentHash: string;
+  replaceTarget?: { id: string; storagePath: string };
+}
+
 function bucketName(): string {
   return process.env.NEXT_PUBLIC_SUPABASE_BUCKET ?? "ghg";
 }
@@ -27,12 +34,17 @@ function bucketName(): string {
  * Upload a single file to Supabase Storage and insert the matching
  * documents row. On insert failure, best-effort delete the Storage blob
  * so we never leave an orphaned object.
+ *
+ * If `item.replaceTarget` is set, the existing document + its storage object
+ * are deleted first. Failure of the delete aborts before we upload the new
+ * file, so we never end up with both rows.
  */
 export async function uploadDocument(
   projectId: string,
-  file: File,
+  item: UploadItem,
   onProgress: UploadProgressHandler,
 ): Promise<Document | null> {
+  const { file, contentHash, replaceTarget } = item;
   const supabase = createClient();
   const documentId = crypto.randomUUID();
   const bucket = bucketName();
@@ -42,6 +54,19 @@ export async function uploadDocument(
     filename: file.name,
     size: file.size,
   };
+
+  if (replaceTarget) {
+    try {
+      await deleteDocument(replaceTarget.id, replaceTarget.storagePath);
+    } catch (err) {
+      onProgress({
+        ...base,
+        phase: "error",
+        error: err instanceof Error ? err.message : "Replace failed",
+      });
+      return null;
+    }
+  }
 
   onProgress({ ...base, phase: "uploading" });
 
@@ -72,6 +97,7 @@ export async function uploadDocument(
       storage_path: storagePath,
       filename: file.name,
       file_size_bytes: file.size,
+      content_hash: contentHash,
       status: "uploaded",
     })
     .select()
@@ -97,16 +123,16 @@ export async function uploadDocument(
 }
 
 /**
- * Run uploads in parallel with a bounded concurrency limit. Each file is
+ * Run uploads in parallel with a bounded concurrency limit. Each item is
  * reported independently — no Promise.all rejection semantics.
  */
 export async function uploadDocumentsConcurrently(
   projectId: string,
-  files: File[],
+  items: UploadItem[],
   concurrency: number,
   onProgress: UploadProgressHandler,
 ): Promise<void> {
-  const queue = [...files];
+  const queue = [...items];
   const workers: Promise<void>[] = [];
   const workerCount = Math.max(1, Math.min(concurrency, queue.length));
 
@@ -114,9 +140,9 @@ export async function uploadDocumentsConcurrently(
     workers.push(
       (async () => {
         while (queue.length > 0) {
-          const file = queue.shift();
-          if (!file) return;
-          await uploadDocument(projectId, file, onProgress);
+          const item = queue.shift();
+          if (!item) return;
+          await uploadDocument(projectId, item, onProgress);
         }
       })(),
     );

@@ -1,3 +1,5 @@
+"use client";
+
 import * as React from "react";
 import { Icon } from "./Primitives";
 import { Sidebar } from "./Sidebar";
@@ -10,18 +12,35 @@ type ShellProps = {
   rightRail?: React.ReactNode;
 };
 
-export const Shell: React.FC<ShellProps> = ({ children, rightRail }) => (
-  <div className="lc" style={{ display: "flex", height: "100vh", width: "100%", background: "var(--bg)" }}>
-    <Sidebar />
-    <main style={{
-      flex: 1, minWidth: 0, height: "100%",
-      display: "flex", flexDirection: "column", overflow: "hidden",
-    }}>
-      {children}
-    </main>
-    {rightRail}
-  </div>
-);
+export const Shell: React.FC<ShellProps> = ({ children, rightRail }) => {
+  const [collapsed, setCollapsed] = React.useState(false);
+  const toggle = React.useCallback(() => setCollapsed((c) => !c), []);
+
+  return (
+    <div className="lc" style={{ display: "flex", height: "100vh", width: "100%", background: "var(--bg)" }}>
+      <Sidebar onToggle={toggle} collapsed={collapsed} />
+      <main style={{
+        flex: 1, minWidth: 0, height: "100%",
+        display: "flex", flexDirection: "column", overflow: "hidden",
+        position: "relative",
+      }}>
+        {collapsed && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-icon"
+            aria-label="Open sidebar"
+            onClick={toggle}
+            style={{ position: "absolute", top: 9, left: 10, zIndex: 5 }}
+          >
+            <Icon name="sidebar" size={15} color="var(--fg-3)" />
+          </button>
+        )}
+        {children}
+      </main>
+      {rightRail}
+    </div>
+  );
+};
 
 type PageHeaderProps = {
   title?: string;

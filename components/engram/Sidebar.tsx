@@ -100,7 +100,7 @@ export const SidebarNavItem: React.FC<SidebarNavItemProps> = ({ icon, label, cou
     );
   }
   return (
-    <div className={className} role="link" aria-disabled="true" tabIndex={0} style={{ cursor: "default" }}>
+    <div className={className} role="link" aria-disabled="true" tabIndex={0}>
       {body}
     </div>
   );
@@ -113,13 +113,19 @@ type SidebarBrandProps = {
 // Brand row: hex logo + wordmark + sidebar-toggle icon button.
 export const SidebarBrand: React.FC<SidebarBrandProps> = ({ onToggle }) => (
   <div style={{ padding: "12px 10px 8px", display: "flex", alignItems: "center", gap: 8 }}>
-    <div style={{ display: "flex", alignItems: "center", gap: 8, flex: 1, padding: "2px 4px" }}>
+    <Link
+      href="/projects"
+      style={{
+        display: "flex", alignItems: "center", gap: 8, flex: 1, padding: "2px 4px",
+        textDecoration: "none", color: "inherit",
+      }}
+    >
       <HexLogo size={22} />
       <span style={{
         color: "var(--fg)", fontWeight: 600, fontSize: 14.5,
         letterSpacing: "-0.02em", fontFeatureSettings: '"cv01","ss03"',
       }}>Engram</span>
-    </div>
+    </Link>
     <button type="button" className="btn btn-ghost btn-icon" aria-label="Toggle sidebar" onClick={onToggle}>
       <Icon name="sidebar" size={15} color="var(--fg-3)" />
     </button>
@@ -129,7 +135,7 @@ export const SidebarBrand: React.FC<SidebarBrandProps> = ({ onToggle }) => (
 // Data-driven nav model so individual items are easy to edit / reorder.
 export const SIDEBAR_TOP: SidebarNavModel[] = [
   { id: "search", icon: "search", label: "Search" },
-  { id: "mine",   icon: "user",   label: "My projects" },
+  { id: "mine",   icon: "user",   label: "My projects", href: "/projects" },
 ];
 
 export const SIDEBAR_WORKSPACE: SidebarNavModel[] = [
@@ -149,37 +155,48 @@ const isActive = (pathname: string, href: string | undefined) => {
 
 type SidebarProps = {
   onToggle?: () => void;
+  collapsed?: boolean;
 };
 
 // The sidebar itself. Active item is derived from pathname — no props needed.
-export const Sidebar: React.FC<SidebarProps> = ({ onToggle }) => {
+export const Sidebar: React.FC<SidebarProps> = ({ onToggle, collapsed = false }) => {
   const pathname = usePathname() ?? "";
   const [openWorkspace, setOpenWorkspace] = React.useState(true);
 
   return (
     <aside style={{
-      width: 220, flex: "0 0 220px", height: "100%",
+      width: collapsed ? 0 : 220,
+      flex: collapsed ? "0 0 0px" : "0 0 220px",
+      height: "100%",
       background: "var(--bg-deep)",
-      borderRight: "1px solid var(--border)",
+      borderRight: collapsed ? "none" : "1px solid var(--border)",
+      overflow: "hidden",
       display: "flex", flexDirection: "column",
       fontSize: 13,
+      transition: "width 200ms ease, flex-basis 200ms ease",
     }}>
-      <SidebarBrand onToggle={onToggle} />
+      <div style={{ width: 220, flex: "0 0 auto", display: "flex", flexDirection: "column", height: "100%" }}>
+        <SidebarBrand onToggle={onToggle} />
 
-      <nav className="scroll" style={{ flex: 1, overflow: "auto", padding: "4px 10px 10px" }}>
-        {SIDEBAR_TOP.map((it) => (
-          <SidebarNavItem key={it.id} {...it} active={isActive(pathname, it.href)} />
-        ))}
+        <nav className="scroll" style={{ flex: 1, overflow: "auto", padding: "4px 10px 10px" }}>
+          {SIDEBAR_TOP.map((it) => (
+            <SidebarNavItem
+              key={it.id}
+              {...it}
+              active={it.id === "mine" ? false : isActive(pathname, it.href)}
+            />
+          ))}
 
-        <SidebarSection
-          label="Workspace"
-          open={openWorkspace}
-          onClick={() => setOpenWorkspace(!openWorkspace)}
-        />
-        {openWorkspace && SIDEBAR_WORKSPACE.map((it) => (
-          <SidebarNavItem key={it.id} {...it} active={isActive(pathname, it.href)} />
-        ))}
-      </nav>
+          <SidebarSection
+            label="Workspace"
+            open={openWorkspace}
+            onClick={() => setOpenWorkspace(!openWorkspace)}
+          />
+          {openWorkspace && SIDEBAR_WORKSPACE.map((it) => (
+            <SidebarNavItem key={it.id} {...it} active={isActive(pathname, it.href)} />
+          ))}
+        </nav>
+      </div>
     </aside>
   );
 };

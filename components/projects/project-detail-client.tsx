@@ -17,6 +17,7 @@ import {
   ACCEPTED_EXTS,
   COMPANIES,
   MAX_FILE_SIZE,
+  MIN_FILE_SIZE,
   TERMINAL_JOB_STATUSES,
   UPLOAD_CONCURRENCY,
   hasAcceptedExt,
@@ -26,8 +27,19 @@ import type { Document, Job, JobStatus, Project } from "@/lib/domain/ghg";
 import {
   uploadDocumentsConcurrently,
   deleteDocument,
+  type UploadItem,
   type UploadProgress,
 } from "@/lib/ghg/upload";
+import { hashFilesConcurrently } from "@/lib/ghg/hash";
+import {
+  categorizeUploads,
+  dedupedFilename,
+  type DedupResult,
+} from "@/lib/ghg/dedup";
+import {
+  UploadConflictDialog,
+  type ResolutionChoice,
+} from "@/components/projects/upload-conflict-dialog";
 import { startJob } from "@/lib/ghg/jobs";
 import type { GHGGraphData } from "@/lib/types";
 
@@ -111,6 +123,12 @@ export function ProjectDetailClient({
   const [page, setPage] = useState(1);
   const [submittingJob, setSubmittingJob] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [conflictDialog, setConflictDialog] = useState<{
+    conflicts: DedupResult[];
+    resolve: (resolutions: Map<File, ResolutionChoice>) => void;
+    cancel: () => void;
+  } | null>(null);
+  const preflightInFlight = useRef(false);
 
   const seenTerminals = useRef<Set<string>>(
     new Set(
@@ -265,6 +283,10 @@ export function ProjectDetailClient({
           toast.error(`${file.name}: unsupported file type`);
           continue;
         }
+        if (file.size < MIN_FILE_SIZE) {
+          toast.error(`${file.name}: file is empty`);
+          continue;
+        }
         if (file.size > MAX_FILE_SIZE) {
           toast.error(`${file.name}: exceeds 50 MB limit`);
           continue;
@@ -276,13 +298,11 @@ export function ProjectDetailClient({
     [],
   );
 
-  const handleFiles = useCallback(
-    (fileList: FileList | File[]) => {
-      const files = validateAndCollect(fileList);
-      if (files.length === 0) return;
+  const runUploads = useCallback(
+    (items: UploadItem[]) => {
       void uploadDocumentsConcurrently(
         project.id,
-        files,
+        items,
         UPLOAD_CONCURRENCY,
         (progress) => {
           setUploadingMap((prev) => {
@@ -310,7 +330,112 @@ export function ProjectDetailClient({
         },
       );
     },
-    [project.id, validateAndCollect, addOrUpdateDocument],
+    [project.id, addOrUpdateDocument],
+  );
+
+  const handleFiles = useCallback(
+    async (fileList: FileList | File[]) => {
+      if (preflightInFlight.current) {
+        toast.error("Already preparing an upload — finish that first");
+        return;
+      }
+      const files = validateAndCollect(fileList);
+      if (files.length === 0) return;
+
+      preflightInFlight.current = true;
+      try {
+        const hashes = await hashFilesConcurrently(files, UPLOAD_CONCURRENCY);
+        const categorized = await categorizeUploads(
+          supabase,
+          project.id,
+          hashes,
+        );
+
+        for (const r of categorized) {
+          if (r.category !== "exact-dup") continue;
+          if (r.existing) {
+            const sameName = r.existing.filename === r.file.name;
+            toast(
+              sameName
+                ? `${r.file.name}: already uploaded ${formatRelative(r.existing.uploaded_at)} — skipped`
+                : `${r.file.name}: identical to "${r.existing.filename}" already in this project — skipped`,
+            );
+          } else if (r.inBatchSibling) {
+            toast(
+              `${r.file.name}: identical to "${r.inBatchSibling.name}" in this batch — skipped`,
+            );
+          }
+        }
+
+        const nameConflicts = categorized.filter(
+          (r) => r.category === "name-conflict",
+        );
+        let resolutions = new Map<File, ResolutionChoice>();
+        if (nameConflicts.length > 0) {
+          try {
+            resolutions = await new Promise<Map<File, ResolutionChoice>>(
+              (resolve, reject) => {
+                setConflictDialog({
+                  conflicts: nameConflicts,
+                  resolve,
+                  cancel: () => reject(new Error("cancelled")),
+                });
+              },
+            );
+          } catch {
+            setConflictDialog(null);
+            toast(
+              `Upload cancelled — ${files.length} ${files.length === 1 ? "file was" : "files were"} not uploaded`,
+            );
+            return;
+          }
+        }
+
+        const taken = new Set<string>(documents.map((d) => d.filename));
+        const items: UploadItem[] = [];
+        for (const r of categorized) {
+          if (r.category === "exact-dup") continue;
+          if (r.category === "fresh") {
+            taken.add(r.file.name);
+            items.push({ file: r.file, contentHash: r.hash });
+            continue;
+          }
+          const choice = resolutions.get(r.file);
+          if (!choice || choice === "keep") continue;
+          if (choice === "replace" && r.existing) {
+            items.push({
+              file: r.file,
+              contentHash: r.hash,
+              replaceTarget: {
+                id: r.existing.id,
+                storagePath: r.existing.storage_path,
+              },
+            });
+            continue;
+          }
+          if (choice === "rename") {
+            const newName = dedupedFilename(r.file.name, taken);
+            taken.add(newName);
+            const renamed = new File([r.file], newName, {
+              type: r.file.type,
+            });
+            items.push({ file: renamed, contentHash: r.hash });
+          }
+        }
+
+        if (items.length === 0) return;
+        runUploads(items);
+      } catch (err) {
+        toast.error(
+          err instanceof Error
+            ? `Upload preparation failed: ${err.message}`
+            : "Upload preparation failed",
+        );
+      } finally {
+        preflightInFlight.current = false;
+      }
+    },
+    [project.id, validateAndCollect, supabase, documents, runUploads],
   );
 
   // Window-level drag listeners so files dragged anywhere on the page light
@@ -746,6 +871,18 @@ export function ProjectDetailClient({
       </div>
 
       {isDragging && <FullScreenDropOverlay />}
+
+      {conflictDialog && (
+        <UploadConflictDialog
+          open
+          conflicts={conflictDialog.conflicts}
+          onResolve={(res) => {
+            conflictDialog.resolve(res);
+            setConflictDialog(null);
+          }}
+          onCancel={conflictDialog.cancel}
+        />
+      )}
     </Shell>
   );
 }
