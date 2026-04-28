@@ -243,18 +243,18 @@ export function ProjectDetailClient({
   const hasSucceededJob = jobs.some((j) => j.status === "succeeded");
   useEffect(() => {
     if (!hasSucceededJob) return;
-    if (graphCache.get(project.id)) return;
+    if (graphCache.get(project.id, null)) return;
     let cancelled = false;
     (async () => {
       const { data: row } = await supabase
         .from("graphs")
         .select("graph_json")
         .eq("project_id", project.id)
-        .order("built_at", { ascending: false })
+        .order("version_number", { ascending: false })
         .limit(1)
         .maybeSingle();
       if (cancelled || !row?.graph_json) return;
-      graphCache.set(project.id, row.graph_json as unknown as GHGGraphData);
+      graphCache.set(project.id, null, row.graph_json as unknown as GHGGraphData);
     })();
     return () => {
       cancelled = true;
@@ -638,7 +638,8 @@ export function ProjectDetailClient({
       ? "Upload at least one document to enable processing"
       : undefined;
 
-  const viewGraphDisabled = !graphCache.get(project.id) && !hasSucceededJob;
+  const viewGraphDisabled =
+    !graphCache.get(project.id, null) && !hasSucceededJob;
 
   // ---------- Render ----------
 

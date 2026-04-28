@@ -93,12 +93,17 @@ export interface GHGGraphProps {
   crumbs: React.ReactNode[];
   // Optional right-aligned actions in the page header (e.g. company · year).
   headerActions?: React.ReactNode;
+  // Optional canvas overlay rendered inside the relative chrome container,
+  // on top of the force graph. Used by the project view to mount the
+  // graph-history rail.
+  extraOverlay?: React.ReactNode;
 }
 
 export default function GHGGraph({
   initialData,
   crumbs,
   headerActions,
+  extraOverlay,
 }: GHGGraphProps) {
   const fgRef = useRef<ForceGraphMethods<GraphNode, GraphLink> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -1252,6 +1257,8 @@ export default function GHGGraph({
           ))}
         </div>
       </div>
+
+      {extraOverlay}
     </div>
   );
 

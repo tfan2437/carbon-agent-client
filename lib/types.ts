@@ -254,6 +254,18 @@ export interface GHGGraphData {
   links: GHGLink[];
 }
 
+// Row shape for the version selector / history rail. Mirrors the
+// `summary` jsonb column on `graphs`, which is a copy of GHGGraphMeta.
+export type GraphVersionSummary = GHGGraphMeta;
+
+export interface GraphVersionListItem {
+  id: string;
+  version_number: number;
+  built_at: string;
+  job_id: string;
+  summary: GraphVersionSummary;
+}
+
 // ─── UI-only helpers ────────────────────────────────────────────────
 
 export const NODE_COLORS = {
