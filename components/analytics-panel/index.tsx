@@ -158,7 +158,7 @@ export default function AnalyticsPanel({
           bottom: 16,
           right: 16,
           width: 480,
-          zIndex: 40,
+          zIndex: 60,
           background: 'rgba(20, 16, 14, 0.85)',
           backdropFilter: 'blur(12px)',
           WebkitBackdropFilter: 'blur(12px)',

@@ -1,14 +1,15 @@
 import * as React from "react";
 
 export type IconName =
-  | "search" | "plus" | "chevronDown" | "chevronRight" | "chevronLeft"
+  | "search" | "plus" | "minus" | "chevronDown" | "chevronRight" | "chevronLeft"
   | "more" | "filter" | "sort" | "layers" | "inbox" | "user" | "folder"
   | "grid" | "list" | "settings" | "help" | "upload" | "file" | "fileText"
   | "download" | "check" | "x" | "trash" | "alert" | "clock" | "play"
   | "pause" | "zoom" | "zoomOut" | "graph" | "sparkles" | "arrowLeft"
   | "arrowRight" | "flame" | "zap" | "snowflake" | "factory" | "bus"
   | "workers" | "globe" | "pdf" | "csv" | "xlsx" | "cycle" | "sidebar"
-  | "eye" | "edit" | "leaf" | "chart" | "database" | "copy" | "lock";
+  | "eye" | "edit" | "leaf" | "chart" | "database" | "copy" | "lock"
+  | "maximize";
 
 type IconProps = {
   name: IconName;
@@ -34,6 +35,7 @@ export const Icon: React.FC<IconProps> = ({ name, size = 16, color = "currentCol
   const icons: Record<IconName, React.ReactNode> = {
     search: <><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></>,
     plus: <><path d="M12 5v14M5 12h14"/></>,
+    minus: <><path d="M5 12h14"/></>,
     chevronDown: <><path d="m6 9 6 6 6-6"/></>,
     chevronRight: <><path d="m9 18 6-6-6-6"/></>,
     chevronLeft: <><path d="m15 18-6-6 6-6"/></>,
@@ -84,6 +86,7 @@ export const Icon: React.FC<IconProps> = ({ name, size = 16, color = "currentCol
     database: <><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5M3 12a9 3 0 0 0 18 0"/></>,
     copy: <><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></>,
     lock: <><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></>,
+    maximize: <><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></>,
   };
   return <svg {...p}>{icons[name]}</svg>;
 };

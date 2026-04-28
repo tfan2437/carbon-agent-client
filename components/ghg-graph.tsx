@@ -119,7 +119,6 @@ export default function GHGGraph({
   const [graph] = useState<GHGGraphData | null>(initialData ?? null);
 
   // Filters
-  const [selectedYear] = useState(2025);
   const [scopeFilter, setScopeFilter] = useState<{ scope1: boolean; scope2: boolean }>({ scope1: true, scope2: true });
   const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
   const [sourceTypeFilter, setSourceTypeFilter] = useState<Set<SourceType>>(
@@ -662,8 +661,8 @@ export default function GHGGraph({
           top: 16,
           left: 16,
           zIndex: 40,
-          width: filterPanelOpen ? 280 : 38,
-          transition: 'width 200ms ease-out',
+          width: filterPanelOpen ? 280 : 100,
+          transition: 'width 240ms cubic-bezier(0.32, 0.72, 0, 1)',
         }}
       >
         <div style={{ ...overlayPanelStyle, overflow: 'hidden' }}>
@@ -699,13 +698,12 @@ export default function GHGGraph({
             aria-expanded={filterPanelOpen}
             title={filterPanelOpen ? 'Collapse filters' : 'Open filters'}
           >
-            {filterPanelOpen && <span>Filters</span>}
+            <span>Filters</span>
             <span
               style={{
                 display: 'inline-flex',
                 transform: filterPanelOpen ? 'rotate(0deg)' : 'rotate(180deg)',
-                transition: 'transform 180ms ease-out',
-                marginLeft: filterPanelOpen ? 'auto' : 0,
+                transition: 'transform 240ms cubic-bezier(0.32, 0.72, 0, 1)',
               }}
             >
               <Icon name="chevronLeft" size={14} color="var(--fg-3)" />
@@ -722,6 +720,8 @@ export default function GHGGraph({
                 gap: 14,
                 maxHeight: 'calc(100vh - 140px)',
                 overflowY: 'auto',
+                animation:
+                  'wv-panel-in 220ms cubic-bezier(0.32, 0.72, 0, 1) 60ms both',
               }}
             >
               {/* Search */}
@@ -964,9 +964,7 @@ export default function GHGGraph({
           }}
         >
           <div>
-            <div style={sectionLabelStyle}>
-              Total Emissions ({selectedYear})
-            </div>
+            <div style={sectionLabelStyle}>Total Emissions</div>
             <div
               className="stat-num peach"
               style={{
@@ -987,7 +985,10 @@ export default function GHGGraph({
               </span>
             </div>
           </div>
-          <div
+          {/* TODO: bring back the Scope 1 / Scope 2 summary later if wanted.
+              The leading divider belongs to this block — uncomment together
+              and the layout returns to the 3-section strip. */}
+          {/* <div
             style={{
               width: 1,
               height: 36,
@@ -1055,7 +1056,7 @@ export default function GHGGraph({
                 {formatNumber(stats.scope2)}
               </span>
             </div>
-          </div>
+          </div> */}
           <div
             style={{
               width: 1,
@@ -1140,7 +1141,7 @@ export default function GHGGraph({
               e.currentTarget.style.color = 'var(--fg-2)';
             }}
           >
-            <Icon name="zoom" size={15} />
+            <Icon name="plus" size={15} />
           </button>
           <button
             type="button"
@@ -1170,7 +1171,7 @@ export default function GHGGraph({
               e.currentTarget.style.color = 'var(--fg-2)';
             }}
           >
-            <Icon name="zoomOut" size={15} />
+            <Icon name="minus" size={15} />
           </button>
           <button
             type="button"
@@ -1199,18 +1200,20 @@ export default function GHGGraph({
               e.currentTarget.style.color = 'var(--fg-2)';
             }}
           >
-            <Icon name="cycle" size={15} />
+            <Icon name="maximize" size={15} />
           </button>
         </div>
       </div>
 
-      {/* Legend — bottom-left */}
+      {/* Legend — bottom-left. Caps at the expanded filter rail's 280px;
+          shrinks to fit when the active theme has fewer / shorter entries. */}
       <div
         style={{
           position: 'absolute',
           bottom: 16,
           left: 16,
           zIndex: 40,
+          maxWidth: 280,
         }}
       >
         <div
@@ -1219,12 +1222,10 @@ export default function GHGGraph({
             padding: '8px 14px',
             display: 'flex',
             alignItems: 'center',
-            gap: 16,
+            flexWrap: 'wrap',
+            gap: '6px 12px',
           }}
         >
-          <span style={{ ...sectionLabelStyle, marginBottom: 0 }}>
-            {theme.englishName}
-          </span>
           {theme.legend.map((entry) => (
             <div
               key={entry.label}
