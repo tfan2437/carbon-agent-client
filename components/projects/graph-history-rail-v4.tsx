@@ -59,11 +59,10 @@ export function GraphHistoryRailV4({
     <>
       <div
         style={{
-          // Aligned to the right edge of the stats strip (right: 16);
-          // gap below the strip — strip renders ~86px tall so 104 leaves
-          // a ~17px margin.
+          // Aligned to the right edge of the stats strip (right: 16).
+          // Strip renders ~86px tall, so top: 94 leaves a ~8px margin.
           position: "absolute",
-          top: 104,
+          top: 94,
           right: 16,
           width: 150,
           maxHeight: "calc(100vh - 200px)",
@@ -89,7 +88,7 @@ export function GraphHistoryRailV4({
             borderBottom: "1px solid var(--border-2)",
           }}
         >
-          Branch
+          History
         </div>
 
         {/* No vertical padding — rows sit flush against the header border
