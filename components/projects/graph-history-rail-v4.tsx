@@ -194,14 +194,14 @@ export function GraphHistoryRailV4({
       </div>
 
       {/* Side popover anchored to the hovered row's vertical position.
-          V4 left edge is at right: 166 (right 16 + width 150); popover
-          sits just left of that. */}
+          History rail left edge is at right: 166 (right 16 + width 150);
+          popover sits 8px left of that. */}
       {hover && hoveredDiff && hoveredDiff.hasParent && hoveredParentLabel && (
         <div
           style={{
             position: "fixed",
             top: hover.rowTop,
-            right: 192,
+            right: 174,
             width: 220,
             zIndex: 60,
             background: "rgba(28, 22, 20, 0.96)",
