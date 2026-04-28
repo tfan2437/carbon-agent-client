@@ -13,9 +13,11 @@ import {
   loadGraphVersionJson,
   loadLatestGraphVersionJson,
 } from "@/lib/ghg/graph-versions";
-import { computeGraphDiff } from "@/lib/diff-graph";
+import { computeGraphDiff, type GraphDiff } from "@/lib/diff-graph";
 import { GraphHistoryRail } from "@/components/projects/graph-history-rail";
 import { GraphDiffPanel } from "@/components/projects/graph-diff-panel";
+import { GraphHistoryRailV2 } from "@/components/projects/graph-history-rail-v2";
+import { GraphHistoryRailV3 } from "@/components/projects/graph-history-rail-v3";
 import { Shell, PageHeader } from "@/components/engram/Shell";
 import { Icon } from "@/components/engram/Primitives";
 
@@ -328,6 +330,62 @@ export function GraphViewClient({
     return p ? `v${p.version_number}` : null;
   }, [versions, parentVersionId]);
 
+  // Pre-load every version's graph_json so the alt rails (V2/V3) can
+  // show diffs on hover without staggered fetch latency. Cache hits
+  // are free; fresh fetches kick off in parallel and populate as they
+  // resolve. Capped at 20 to keep the up-front payload bounded — past
+  // that, we fall back to "diff visible only after hover triggers a
+  // load" which is fine but choppier.
+  const [versionDataTick, setVersionDataTick] = useState(0);
+  useEffect(() => {
+    const PRELOAD_CAP = 20;
+    let cancelled = false;
+    (async () => {
+      const targets = versions.slice(0, PRELOAD_CAP);
+      await Promise.all(
+        targets.map(async (v) => {
+          if (cache.get(projectId, v.id)) return;
+          try {
+            const json = await loadGraphVersionJson(supabase, v.id);
+            if (cancelled) return;
+            cache.set(projectId, v.id, json);
+          } catch (e) {
+            console.error("[history] version preload failed:", v.id, e);
+          }
+        }),
+      );
+      if (!cancelled) setVersionDataTick((t) => t + 1);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, cache, projectId, versions]);
+
+  // Compute diffs for every (vN, vN-1) pair using whatever's in cache
+  // right now. Re-runs when preloads finish or versions change.
+  const diffsByVersionId = useMemo(() => {
+    void versionDataTick; // include in deps via the read
+    const out = new Map<string, GraphDiff>();
+    versions.forEach((v, i) => {
+      const data = cache.get(projectId, v.id);
+      if (!data) return;
+      const parent = versions[i + 1];
+      const parentData = parent ? cache.get(projectId, parent.id) : null;
+      out.set(v.id, computeGraphDiff(parentData, data));
+    });
+    return out;
+  }, [versions, cache, projectId, versionDataTick]);
+
+  // Parent label per version, for the alt rails' hover popover headers.
+  const parentLabelByVersionId = useMemo(() => {
+    const out = new Map<string, string>();
+    versions.forEach((v, i) => {
+      const parent = versions[i + 1];
+      if (parent) out.set(v.id, `v${parent.version_number}`);
+    });
+    return out;
+  }, [versions]);
+
   const handleSelectVersion = (versionId: string) => {
     // Newest version → drop the param (URL stays clean for the default view).
     const isLatest = versions[0]?.id === versionId;
@@ -341,6 +399,9 @@ export function GraphViewClient({
     router.replace(qs ? `?${qs}` : `?`, { scroll: false });
   };
 
+  // Three rails side-by-side as TEMPORARY exploratory UI — V1 is the
+  // shipped baseline (right edge); V2 and V3 are alternative designs
+  // stacked to its left for comparison. Pick one before merging.
   const overlay = (
     <>
       <GraphHistoryRail
@@ -351,6 +412,20 @@ export function GraphViewClient({
       {diff && parentLabel && (
         <GraphDiffPanel diff={diff} parentLabel={parentLabel} />
       )}
+      <GraphHistoryRailV2
+        versions={versions}
+        selectedVersionId={resolvedVersionId}
+        diffsByVersionId={diffsByVersionId}
+        parentLabelByVersionId={parentLabelByVersionId}
+        onSelect={handleSelectVersion}
+      />
+      <GraphHistoryRailV3
+        versions={versions}
+        selectedVersionId={resolvedVersionId}
+        diffsByVersionId={diffsByVersionId}
+        parentLabelByVersionId={parentLabelByVersionId}
+        onSelect={handleSelectVersion}
+      />
     </>
   );
 
