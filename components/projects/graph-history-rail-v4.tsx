@@ -61,7 +61,7 @@ export function GraphHistoryRailV4({
           position: "absolute",
           top: 76,
           right: 768,
-          width: 220,
+          width: 150,
           maxHeight: "calc(100vh - 200px)",
           zIndex: 35,
           display: "flex",
@@ -107,9 +107,6 @@ export function GraphHistoryRailV4({
             const isLatest = idx === 0;
             const isSelected = row.id === selectedVersionId;
             const isHovered = hover?.versionId === row.id;
-            const diff = diffsByVersionId.get(row.id);
-            const totalDelta = diff && diff.hasParent ? diff.totalDelta : null;
-            const delta = fmtDelta(totalDelta);
             const isLastInList = idx === versions.length - 1;
             const dotColor = isSelected ? "var(--primary)" : "var(--fg-3)";
 
@@ -221,18 +218,6 @@ export function GraphHistoryRailV4({
                   >
                     {(row.summary.total_tco2e ?? 0).toFixed(2)} t
                   </span>
-                  {delta && (
-                    <span
-                      className="mono"
-                      style={{
-                        fontSize: 10.5,
-                        color: delta.color,
-                        fontVariantNumeric: "tabular-nums",
-                      }}
-                    >
-                      {delta.text}
-                    </span>
-                  )}
                 </div>
               </div>
             );
@@ -247,9 +232,9 @@ export function GraphHistoryRailV4({
           style={{
             position: "fixed",
             top: hover.rowTop,
-            // V4 sits at right: 768 with width 220, so its left edge is at
-            // right: 988. Popover floats further left of that.
-            right: 1016,
+            // V4 sits at right: 768 with width 150, so its left edge is at
+            // right: 918. Popover floats just left of that with a small gap.
+            right: 944,
             width: 220,
             zIndex: 60,
             background: "rgba(28, 22, 20, 0.96)",
