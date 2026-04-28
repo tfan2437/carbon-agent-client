@@ -32,9 +32,13 @@
   --cream:         #F8EED2;
   --cream-soft:    oklch(0.95 0.04 85 / 0.08);
 
-  /* Scopes */
-  --scope-1:       #DE7356;    /* peach */
-  --scope-2:       #6FA4C9;    /* cool blue */
+  /* Scopes — see docs/palette.md */
+  --scope-1:       #C99C3D;    /* gold (direct emissions) */
+  --scope-1-soft:  rgba(201, 156, 61, 0.15);
+  --scope-1-line:  rgba(201, 156, 61, 0.40);
+  --scope-2:       #5B89B8;    /* slate (purchased electricity) */
+  --scope-2-soft:  rgba(91, 137, 184, 0.15);
+  --scope-2-line:  rgba(91, 137, 184, 0.40);
 
   /* Status */
   --success:       oklch(0.72 0.14 155);

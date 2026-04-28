@@ -142,10 +142,10 @@ export default function AnalyticsPanel({
       padding: '2px 7px',
       borderRadius: 9999,
       border: isOne
-        ? '1px solid var(--primary-line)'
-        : '1px solid rgba(111,164,201,0.40)',
-      background: isOne ? 'var(--primary-soft)' : 'rgba(111,164,201,0.15)',
-      color: isOne ? 'var(--primary)' : '#6FA4C9',
+        ? '1px solid var(--scope-1-line)'
+        : '1px solid var(--scope-2-line)',
+      background: isOne ? 'var(--scope-1-soft)' : 'var(--scope-2-soft)',
+      color: isOne ? 'var(--scope-1)' : 'var(--scope-2)',
     } as const;
   };
 

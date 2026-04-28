@@ -42,8 +42,8 @@ export interface Theme {
 // ─── Tokens ──────────────────────────────────────────────────────────
 
 export const SCOPE_TOKENS = {
-  scope1: '#F59E0B',
-  scope2: '#3B82F6',
+  scope1: '#C99C3D',  // gold — see docs/palette.md
+  scope2: '#5B89B8',  // slate
   neutral: '#6B7280',
 } as const;
 

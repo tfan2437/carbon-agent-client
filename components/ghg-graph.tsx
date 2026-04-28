@@ -51,11 +51,12 @@ const ALL_EMISSION_TYPES: EmissionType[] = [
 ];
 
 const SOURCE_TYPE_LABELS: Record<SourceType, string> = {
-  fuel: '燃料 Fuel',
-  electricity: '電力 Electricity',
-  refrigerant: '冷媒 Refrigerant',
-  work_hours: '人時 Work Hours',
+  fuel: '燃料',
+  electricity: '電力',
+  refrigerant: '冷媒',
+  work_hours: '人時',
 };
+
 
 // source_document has no emissions field; everything else carries emissions_tco2e.
 function nodeEmissions(node: GHGNode): number {
@@ -128,7 +129,7 @@ export default function GHGGraph({
     () => new Set(ALL_EMISSION_TYPES),
   );
   const [searchQuery, setSearchQuery] = useState('');
-  const [topologyMode, setTopologyMode] = useState<TopologyMode>('macro');
+  const [topologyMode, setTopologyMode] = useState<TopologyMode>('expanded');
   const [themeKey, setThemeKey] = useState<ThemeKey>(DEFAULT_THEME);
   const theme = THEMES[themeKey];
 
@@ -494,39 +495,6 @@ export default function GHGGraph({
       'background 180ms ease-out, border-color 180ms ease-out, color 180ms ease-out',
   });
 
-  // Scope-tinted toggle (peach for scope-1 since --scope-1 == --primary,
-  // info-blue for scope-2). Off-state matches segmentBtnStyle inactive.
-  const scopeBtnStyle = (
-    active: boolean,
-    scope: 1 | 2,
-  ): React.CSSProperties => {
-    const color = scope === 1 ? 'var(--primary)' : '#6FA4C9';
-    const soft =
-      scope === 1
-        ? 'var(--primary-soft)'
-        : 'rgba(111,164,201,0.15)';
-    const line =
-      scope === 1
-        ? 'var(--primary-line)'
-        : 'rgba(111,164,201,0.40)';
-    return {
-      flex: 1,
-      height: 32,
-      padding: '0 12px',
-      border: `1px solid ${active ? line : 'var(--border-2)'}`,
-      background: active ? soft : 'rgba(255,255,255,0.02)',
-      color: active ? color : 'var(--fg-3)',
-      borderRadius: 'var(--r-md)',
-      fontSize: 12.5,
-      fontWeight: 500,
-      fontFamily: 'inherit',
-      letterSpacing: '-0.005em',
-      cursor: 'pointer',
-      transition:
-        'background 180ms ease-out, border-color 180ms ease-out, color 180ms ease-out',
-    };
-  };
-
   // Visual chrome — canvas + 4 floating overlays + hover tooltip + analytics
   // panel. Wrapped in a relative container so absolutely-positioned widgets
   // resolve against the canvas, not the viewport.
@@ -656,16 +624,16 @@ export default function GHGGraph({
                   borderRadius: 'var(--r-pill)',
                   border:
                     hoveredNode.scope === 1
-                      ? '1px solid var(--primary-line)'
-                      : '1px solid rgba(111,164,201,0.40)',
+                      ? '1px solid var(--scope-1-line)'
+                      : '1px solid var(--scope-2-line)',
                   background:
                     hoveredNode.scope === 1
-                      ? 'var(--primary-soft)'
-                      : 'rgba(111,164,201,0.15)',
+                      ? 'var(--scope-1-soft)'
+                      : 'var(--scope-2-soft)',
                   color:
                     hoveredNode.scope === 1
-                      ? 'var(--primary)'
-                      : '#6FA4C9',
+                      ? 'var(--scope-1)'
+                      : 'var(--scope-2)',
                 }}
               >
                 Scope {hoveredNode.scope}
@@ -772,35 +740,31 @@ export default function GHGGraph({
                 />
               </div>
 
-              {/* Year + Topology */}
-              <div style={{ display: 'flex', gap: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <span style={sectionLabelStyle}>Year</span>
+              {/* Topology */}
+              <div>
+                <span style={sectionLabelStyle}>View</span>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(2, 1fr)',
+                    gap: 6,
+                  }}
+                >
                   <button
                     type="button"
-                    style={segmentBtnStyle(true)}
-                    aria-disabled
+                    onClick={() => setTopologyMode('macro')}
+                    style={segmentBtnStyle(topologyMode === 'macro')}
+                    title="精簡視圖 (~32 nodes)"
                   >
-                    {selectedYear}
+                    精簡
                   </button>
-                </div>
-                <div style={{ flex: 1 }}>
-                  <span style={sectionLabelStyle}>View</span>
                   <button
                     type="button"
-                    onClick={() =>
-                      setTopologyMode((m) =>
-                        m === 'macro' ? 'expanded' : 'macro',
-                      )
-                    }
-                    style={segmentBtnStyle(false)}
-                    title={
-                      topologyMode === 'macro'
-                        ? '展開所有節點 (~700)'
-                        : '回到精簡視圖 (~32 nodes)'
-                    }
+                    onClick={() => setTopologyMode('expanded')}
+                    style={segmentBtnStyle(topologyMode === 'expanded')}
+                    title="展開所有節點 (~700)"
                   >
-                    {topologyMode === 'macro' ? '精簡' : '展開'}
+                    展開
                   </button>
                 </div>
               </div>
@@ -842,7 +806,7 @@ export default function GHGGraph({
                     onClick={() =>
                       setScopeFilter((f) => ({ ...f, scope1: !f.scope1 }))
                     }
-                    style={scopeBtnStyle(scopeFilter.scope1, 1)}
+                    style={segmentBtnStyle(scopeFilter.scope1)}
                     aria-pressed={scopeFilter.scope1}
                   >
                     Scope 1
@@ -852,7 +816,7 @@ export default function GHGGraph({
                     onClick={() =>
                       setScopeFilter((f) => ({ ...f, scope2: !f.scope2 }))
                     }
-                    style={scopeBtnStyle(scopeFilter.scope2, 2)}
+                    style={segmentBtnStyle(scopeFilter.scope2)}
                     aria-pressed={scopeFilter.scope2}
                   >
                     Scope 2
@@ -908,27 +872,6 @@ export default function GHGGraph({
                       </button>
                     );
                   })}
-                  {selectedFacilities.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => setSelectedFacilities([])}
-                      style={{
-                        marginTop: 4,
-                        height: 26,
-                        background: 'transparent',
-                        border: 0,
-                        color: 'var(--fg-4)',
-                        fontSize: 11.5,
-                        fontFamily: 'inherit',
-                        cursor: 'pointer',
-                        textAlign: 'center',
-                        textDecoration: 'underline',
-                        textUnderlineOffset: 2,
-                      }}
-                    >
-                      Clear selection
-                    </button>
-                  )}
                 </div>
               </div>
 
@@ -1071,7 +1014,7 @@ export default function GHGGraph({
                   width: 7,
                   height: 7,
                   borderRadius: '50%',
-                  background: 'var(--primary)',
+                  background: 'var(--scope-1)',
                 }}
               />
               <span style={{ color: 'var(--fg-3)' }}>Scope 1</span>
@@ -1098,7 +1041,7 @@ export default function GHGGraph({
                   width: 7,
                   height: 7,
                   borderRadius: '50%',
-                  background: '#6FA4C9',
+                  background: 'var(--scope-2)',
                 }}
               />
               <span style={{ color: 'var(--fg-3)' }}>Scope 2</span>
