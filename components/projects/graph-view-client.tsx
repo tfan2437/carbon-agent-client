@@ -18,6 +18,7 @@ import { GraphHistoryRail } from "@/components/projects/graph-history-rail";
 import { GraphDiffPanel } from "@/components/projects/graph-diff-panel";
 import { GraphHistoryRailV2 } from "@/components/projects/graph-history-rail-v2";
 import { GraphHistoryRailV3 } from "@/components/projects/graph-history-rail-v3";
+import { GraphHistoryRailV4 } from "@/components/projects/graph-history-rail-v4";
 import { Shell, PageHeader } from "@/components/engram/Shell";
 import { Icon } from "@/components/engram/Primitives";
 
@@ -420,6 +421,13 @@ export function GraphViewClient({
         onSelect={handleSelectVersion}
       />
       <GraphHistoryRailV3
+        versions={versions}
+        selectedVersionId={resolvedVersionId}
+        diffsByVersionId={diffsByVersionId}
+        parentLabelByVersionId={parentLabelByVersionId}
+        onSelect={handleSelectVersion}
+      />
+      <GraphHistoryRailV4
         versions={versions}
         selectedVersionId={resolvedVersionId}
         diffsByVersionId={diffsByVersionId}
