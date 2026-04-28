@@ -97,6 +97,12 @@ export interface GHGGraphProps {
   // on top of the force graph. Used by the project view to mount the
   // graph-history rail.
   extraOverlay?: React.ReactNode;
+  // When non-null, only nodes whose ids are in this set paint at full
+  // opacity; everything else dims via the existing hover/dim primitive
+  // (opacity 0.15 nodes / 0.05 links). Used by the version selector to
+  // surface what changed in this commit vs. its parent. Hover, when
+  // active, takes precedence over diff dimming.
+  diffHighlightSet?: Set<string> | null;
 }
 
 export default function GHGGraph({
@@ -104,6 +110,7 @@ export default function GHGGraph({
   crumbs,
   headerActions,
   extraOverlay,
+  diffHighlightSet,
 }: GHGGraphProps) {
   const fgRef = useRef<ForceGraphMethods<GraphNode, GraphLink> | undefined>(undefined);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -289,12 +296,16 @@ export default function GHGGraph({
     return () => window.removeEventListener('resize', updateDimensions);
   }, []);
 
-  // Check if node should be highlighted
+  // Check if node should be highlighted. Hover takes precedence; absent
+  // hover, a non-null diffHighlightSet restricts highlight to the diff.
   const isHighlighted = useCallback((nodeId: string): boolean => {
-    if (!hoveredNode) return true;
-    if (hoveredNode.id === nodeId) return true;
-    return neighborMap.get(hoveredNode.id)?.has(nodeId) || false;
-  }, [hoveredNode, neighborMap]);
+    if (hoveredNode) {
+      if (hoveredNode.id === nodeId) return true;
+      return neighborMap.get(hoveredNode.id)?.has(nodeId) || false;
+    }
+    if (diffHighlightSet) return diffHighlightSet.has(nodeId);
+    return true;
+  }, [hoveredNode, neighborMap, diffHighlightSet]);
 
   // Custom node rendering
   const paintNode = useCallback((node: GraphNode, ctx: CanvasRenderingContext2D, globalScale: number) => {
@@ -312,8 +323,9 @@ export default function GHGGraph({
       selectedNode?.id === node.id ||
       (selectedActivityId != null && selectedActivityId === node.id);
 
-    // Opacity based on hover state
-    const opacity = hoveredNode ? (highlighted ? 1 : 0.15) : 1;
+    // Opacity based on hover OR active diff (both dim non-highlighted).
+    const dimMode = hoveredNode != null || diffHighlightSet != null;
+    const opacity = dimMode ? (highlighted ? 1 : 0.15) : 1;
 
     // Draw glow/halo for highlighted nodes
     if (highlighted && (hoveredNode || isSelected)) {
@@ -355,7 +367,7 @@ export default function GHGGraph({
     }
 
     ctx.globalAlpha = 1;
-  }, [maxEmissions, topologyMode, isHighlighted, hoveredNode, selectedNode, selectedActivityId, theme]);
+  }, [maxEmissions, topologyMode, isHighlighted, hoveredNode, selectedNode, selectedActivityId, theme, diffHighlightSet]);
 
   // Custom link rendering
   const paintLink = useCallback((link: GraphLink, ctx: CanvasRenderingContext2D) => {
@@ -380,7 +392,10 @@ export default function GHGGraph({
       selectedNode != null &&
       ((source.id === selectedNode.id && target.id === selectedActivityId) ||
         (target.id === selectedNode.id && source.id === selectedActivityId));
-    const opacity = hoveredNode ? (highlighted ? 0.4 : 0.05) : isDrillEdge ? 0.9 : 0.25;
+    const dimMode = hoveredNode != null || diffHighlightSet != null;
+    const opacity = dimMode
+      ? (highlighted ? 0.4 : 0.05)
+      : isDrillEdge ? 0.9 : 0.25;
 
     ctx.strokeStyle = isDrillEdge
       ? `rgba(255, 255, 255, ${opacity})`
@@ -390,7 +405,7 @@ export default function GHGGraph({
     ctx.moveTo(source.x, source.y);
     ctx.lineTo(target.x, target.y);
     ctx.stroke();
-  }, [isHighlighted, hoveredNode, selectedNode, selectedActivityId]);
+  }, [isHighlighted, hoveredNode, selectedNode, selectedActivityId, diffHighlightSet]);
 
   // Focus on a specific node — used by analytics-panel "jump to facility" actions.
   const focusOnNode = useCallback((node: GraphNode) => {

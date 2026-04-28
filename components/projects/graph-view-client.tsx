@@ -13,6 +13,7 @@ import {
   loadGraphVersionJson,
   loadLatestGraphVersionJson,
 } from "@/lib/ghg/graph-versions";
+import { computeDiffHighlight } from "@/lib/diff-graph";
 import { GraphHistoryRail } from "@/components/projects/graph-history-rail";
 import { Shell, PageHeader } from "@/components/engram/Shell";
 import { Icon } from "@/components/engram/Primitives";
@@ -163,6 +164,16 @@ export function GraphViewClient({
     return versions[0]?.id ?? null; // newest
   }, [versions, requestedVersionId]);
 
+  // Parent version for the diff highlight: the chronologically previous
+  // build. Versions are sorted newest-first, so parent = next index.
+  // null when viewing v1 (no parent → no diff, full color).
+  const parentVersionId = useMemo(() => {
+    if (!resolvedVersionId) return null;
+    const idx = versions.findIndex((v) => v.id === resolvedVersionId);
+    if (idx < 0) return null;
+    return versions[idx + 1]?.id ?? null;
+  }, [versions, resolvedVersionId]);
+
   // Fetch the version list. Re-run when the realtime channel signals a
   // new build (see subscription effect below).
   const [versionsTick, setVersionsTick] = useState(0);
@@ -258,6 +269,52 @@ export function GraphViewClient({
     cachedData,
   ]);
 
+  // Parent-version loader for the diff highlight. Soft-fails: if the
+  // parent can't load, we just don't show diff — the canvas still
+  // renders the current version normally.
+  const cachedParent = parentVersionId
+    ? cache.get(projectId, parentVersionId)
+    : null;
+  const [fetchedParent, setFetchedParent] = useState<{
+    id: string;
+    data: GHGGraphData;
+  } | null>(null);
+  const parentData =
+    cachedParent ??
+    (fetchedParent && fetchedParent.id === parentVersionId
+      ? fetchedParent.data
+      : null);
+
+  useEffect(() => {
+    if (!parentVersionId) return;
+    if (cachedParent) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const json = await loadGraphVersionJson(supabase, parentVersionId);
+        if (cancelled) return;
+        cache.set(projectId, parentVersionId, json);
+        setFetchedParent({ id: parentVersionId, data: json });
+      } catch (e) {
+        // Don't block the canvas — diff just won't show this round.
+        console.error("[diff] parent version load failed:", e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, cache, projectId, parentVersionId, cachedParent]);
+
+  // Diff highlight set: nodes added or changed in the current version
+  // vs. its parent. null while parent loads, for v1 (no parent), or
+  // when nothing changed — an empty set would grey EVERY node and look
+  // like a broken canvas instead of the truthful "nothing changed".
+  const diffHighlightSet = useMemo(() => {
+    if (!data || !parentVersionId || !parentData) return null;
+    const set = computeDiffHighlight(parentData, data);
+    return set.size === 0 ? null : set;
+  }, [data, parentVersionId, parentData]);
+
   const handleSelectVersion = (versionId: string) => {
     // Newest version → drop the param (URL stays clean for the default view).
     const isLatest = versions[0]?.id === versionId;
@@ -318,6 +375,7 @@ export function GraphViewClient({
       crumbs={crumbs}
       headerActions={headerActions}
       extraOverlay={overlay}
+      diffHighlightSet={diffHighlightSet}
     />
   );
 }
