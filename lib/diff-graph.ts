@@ -1,9 +1,5 @@
 import type { GHGGraphData, GHGNode } from "@/lib/types";
 
-// Empty set the rest of the app can pass when there's "nothing to diff"
-// (e.g. v1 has no parent). Avoids allocating per-render.
-export const EMPTY_DIFF_HIGHLIGHT: Set<string> = new Set();
-
 // Numeric tolerance for emissions comparison — graph builder rounds at
 // multiple stages, and float subtraction within ~1e-6 is just noise.
 const EPSILON = 1e-6;
