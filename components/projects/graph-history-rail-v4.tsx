@@ -60,10 +60,10 @@ export function GraphHistoryRailV4({
       <div
         style={{
           // Aligned to the right edge of the stats strip (right: 16);
-          // gap below the strip — strip renders ~86px tall so 112 leaves
-          // a clean ~25px margin.
+          // gap below the strip — strip renders ~86px tall so 104 leaves
+          // a ~17px margin.
           position: "absolute",
-          top: 112,
+          top: 104,
           right: 16,
           width: 150,
           maxHeight: "calc(100vh - 200px)",
