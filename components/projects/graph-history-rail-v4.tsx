@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { GraphVersionListItem, NodeType } from "@/lib/types";
 import { NODE_TYPE_LABELS } from "@/lib/types";
+import { formatRelative } from "@/components/projects/v6-doc-row-helpers";
 import type { GraphDiff } from "@/lib/diff-graph";
 
 export interface GraphHistoryRailV4Props {
@@ -58,9 +59,11 @@ export function GraphHistoryRailV4({
     <>
       <div
         style={{
+          // Aligned to the right edge of the stats strip (right: 16);
+          // small gap below the strip per design direction.
           position: "absolute",
-          top: 76,
-          right: 768,
+          top: 88,
+          right: 16,
           width: 150,
           maxHeight: "calc(100vh - 200px)",
           zIndex: 35,
@@ -83,32 +86,28 @@ export function GraphHistoryRailV4({
             textTransform: "uppercase",
             letterSpacing: "0.08em",
             borderBottom: "1px solid var(--border-2)",
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
           }}
         >
-          <span>Branch</span>
-          <span
-            style={{
-              fontSize: 9.5,
-              color: "var(--fg-4)",
-              opacity: 0.6,
-              textTransform: "none",
-              letterSpacing: 0,
-            }}
-          >
-            v4
-          </span>
+          Branch
         </div>
 
-        <div className="scroll" style={{ flex: 1, overflowY: "auto", padding: "6px 0" }}>
+        {/* No vertical padding — rows sit flush against the header border
+            and the rail's bottom edge so there's no black gutter. */}
+        <div className="scroll" style={{ flex: 1, overflowY: "auto" }}>
           {versions.map((row, idx) => {
-            const isLatest = idx === 0;
             const isSelected = row.id === selectedVersionId;
             const isHovered = hover?.versionId === row.id;
             const isLastInList = idx === versions.length - 1;
             const dotColor = isSelected ? "var(--primary)" : "var(--fg-3)";
+
+            // Selected stays orange even while hovered — only the diff
+            // popover responds to hover. Non-selected rows take the
+            // subtle hover wash.
+            const background = isSelected
+              ? "var(--primary-soft)"
+              : isHovered
+                ? "rgba(255,255,255,0.05)"
+                : "transparent";
 
             return (
               <div
@@ -123,18 +122,15 @@ export function GraphHistoryRailV4({
                   position: "relative",
                   paddingLeft: 28,
                   paddingRight: 12,
-                  paddingTop: 8,
-                  paddingBottom: 8,
+                  paddingTop: 10,
+                  paddingBottom: 10,
                   cursor: "pointer",
-                  background: isHovered
-                    ? "rgba(255,255,255,0.05)"
-                    : isSelected
-                      ? "var(--primary-soft)"
-                      : "transparent",
+                  background,
                   transition: "background 120ms",
                 }}
               >
-                {/* Connector line + dot — same primitives as V2 */}
+                {/* Connector line + dot — both states are hollow rings,
+                    only the ring color changes between selected and not. */}
                 <div
                   style={{
                     position: "absolute",
@@ -155,22 +151,20 @@ export function GraphHistoryRailV4({
                     width: 12,
                     height: 12,
                     borderRadius: "50%",
-                    background: isSelected
-                      ? "rgba(20, 16, 14, 0.78)"
-                      : dotColor,
+                    background: "rgba(20, 16, 14, 0.78)",
                     border: `2px solid ${dotColor}`,
                     boxSizing: "border-box",
                     zIndex: 1,
                   }}
                 />
 
-                {/* Row body — vN + main pill, then total tCO₂e + delta on
-                    the next line. No relative time. */}
+                {/* Row body — vN and relative time, single line */}
                 <div
                   style={{
                     display: "flex",
                     alignItems: "baseline",
-                    gap: 6,
+                    justifyContent: "space-between",
+                    gap: 8,
                   }}
                 >
                   <span
@@ -183,40 +177,14 @@ export function GraphHistoryRailV4({
                   >
                     v{row.version_number}
                   </span>
-                  {isLatest && (
-                    <span
-                      style={{
-                        fontSize: 9,
-                        padding: "1px 6px",
-                        background: "rgba(95, 130, 200, 0.18)",
-                        color: "#9CB7E0",
-                        border: "1px solid rgba(95, 130, 200, 0.4)",
-                        borderRadius: 999,
-                        fontWeight: 500,
-                        letterSpacing: "0.02em",
-                      }}
-                    >
-                      main
-                    </span>
-                  )}
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "baseline",
-                    gap: 6,
-                    marginTop: 2,
-                  }}
-                >
                   <span
-                    className="mono"
                     style={{
-                      fontSize: 11,
-                      color: "var(--fg-3)",
-                      fontVariantNumeric: "tabular-nums",
+                      fontSize: 10.5,
+                      color: "var(--fg-4)",
+                      whiteSpace: "nowrap",
                     }}
                   >
-                    {(row.summary.total_tco2e ?? 0).toFixed(2)} t
+                    {formatRelative(row.built_at)}
                   </span>
                 </div>
               </div>
@@ -225,16 +193,15 @@ export function GraphHistoryRailV4({
         </div>
       </div>
 
-      {/* Side popover anchored to the hovered row's vertical position —
-          same pattern as V3 but floats further left to clear V4's column. */}
+      {/* Side popover anchored to the hovered row's vertical position.
+          V4 left edge is at right: 166 (right 16 + width 150); popover
+          sits just left of that. */}
       {hover && hoveredDiff && hoveredDiff.hasParent && hoveredParentLabel && (
         <div
           style={{
             position: "fixed",
             top: hover.rowTop,
-            // V4 sits at right: 768 with width 150, so its left edge is at
-            // right: 918. Popover floats just left of that with a small gap.
-            right: 944,
+            right: 192,
             width: 220,
             zIndex: 60,
             background: "rgba(28, 22, 20, 0.96)",

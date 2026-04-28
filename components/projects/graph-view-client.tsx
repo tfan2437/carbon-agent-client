@@ -14,10 +14,6 @@ import {
   loadLatestGraphVersionJson,
 } from "@/lib/ghg/graph-versions";
 import { computeGraphDiff, type GraphDiff } from "@/lib/diff-graph";
-import { GraphHistoryRail } from "@/components/projects/graph-history-rail";
-import { GraphDiffPanel } from "@/components/projects/graph-diff-panel";
-import { GraphHistoryRailV2 } from "@/components/projects/graph-history-rail-v2";
-import { GraphHistoryRailV3 } from "@/components/projects/graph-history-rail-v3";
 import { GraphHistoryRailV4 } from "@/components/projects/graph-history-rail-v4";
 import { Shell, PageHeader } from "@/components/engram/Shell";
 import { Icon } from "@/components/engram/Primitives";
@@ -168,16 +164,6 @@ export function GraphViewClient({
     return versions[0]?.id ?? null; // newest
   }, [versions, requestedVersionId]);
 
-  // Parent version for the diff highlight: the chronologically previous
-  // build. Versions are sorted newest-first, so parent = next index.
-  // null when viewing v1 (no parent → no diff, full color).
-  const parentVersionId = useMemo(() => {
-    if (!resolvedVersionId) return null;
-    const idx = versions.findIndex((v) => v.id === resolvedVersionId);
-    if (idx < 0) return null;
-    return versions[idx + 1]?.id ?? null;
-  }, [versions, resolvedVersionId]);
-
   // Fetch the version list. Re-run when the realtime channel signals a
   // new build (see subscription effect below).
   const [versionsTick, setVersionsTick] = useState(0);
@@ -273,70 +259,10 @@ export function GraphViewClient({
     cachedData,
   ]);
 
-  // Parent-version loader for the diff highlight. Soft-fails: if the
-  // parent can't load, we just don't show diff — the canvas still
-  // renders the current version normally.
-  const cachedParent = parentVersionId
-    ? cache.get(projectId, parentVersionId)
-    : null;
-  const [fetchedParent, setFetchedParent] = useState<{
-    id: string;
-    data: GHGGraphData;
-  } | null>(null);
-  const parentData =
-    cachedParent ??
-    (fetchedParent && fetchedParent.id === parentVersionId
-      ? fetchedParent.data
-      : null);
-
-  useEffect(() => {
-    if (!parentVersionId) return;
-    if (cachedParent) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const json = await loadGraphVersionJson(supabase, parentVersionId);
-        if (cancelled) return;
-        cache.set(projectId, parentVersionId, json);
-        setFetchedParent({ id: parentVersionId, data: json });
-      } catch (e) {
-        // Don't block the canvas — diff just won't show this round.
-        console.error("[diff] parent version load failed:", e);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [supabase, cache, projectId, parentVersionId, cachedParent]);
-
-  // Diff highlight set: nodes added or changed in the current version
-  // vs. its parent. null while parent loads or for v1 (no parent).
-  const diff = useMemo(() => {
-    if (!data || !parentVersionId || !parentData) return null;
-    return computeGraphDiff(parentData, data);
-  }, [data, parentVersionId, parentData]);
-
-  // Empty diff (no nodes added/changed) falls back to no dimming —
-  // greying every node would look like a broken canvas instead of the
-  // truthful "nothing changed".
-  const diffHighlightSet = useMemo(() => {
-    if (!diff) return null;
-    return diff.highlightSet.size === 0 ? null : diff.highlightSet;
-  }, [diff]);
-
-  // Parent version's display label (e.g. "v1") for the diff panel header.
-  const parentLabel = useMemo(() => {
-    if (!parentVersionId) return null;
-    const p = versions.find((v) => v.id === parentVersionId);
-    return p ? `v${p.version_number}` : null;
-  }, [versions, parentVersionId]);
-
-  // Pre-load every version's graph_json so the alt rails (V2/V3) can
-  // show diffs on hover without staggered fetch latency. Cache hits
-  // are free; fresh fetches kick off in parallel and populate as they
-  // resolve. Capped at 20 to keep the up-front payload bounded — past
-  // that, we fall back to "diff visible only after hover triggers a
-  // load" which is fine but choppier.
+  // Pre-load every version's graph_json so the rail can show diff details
+  // on hover without staggered fetch latency. Cache hits are free; fresh
+  // fetches kick off in parallel and populate as they resolve. Capped at
+  // 20 to keep the up-front payload bounded.
   const [versionDataTick, setVersionDataTick] = useState(0);
   useEffect(() => {
     const PRELOAD_CAP = 20;
@@ -377,7 +303,7 @@ export function GraphViewClient({
     return out;
   }, [versions, cache, projectId, versionDataTick]);
 
-  // Parent label per version, for the alt rails' hover popover headers.
+  // Parent label per version, for the rail's hover popover headers.
   const parentLabelByVersionId = useMemo(() => {
     const out = new Map<string, string>();
     versions.forEach((v, i) => {
@@ -386,6 +312,17 @@ export function GraphViewClient({
     });
     return out;
   }, [versions]);
+
+  // Canvas dim set: nodes added/changed in the SELECTED version vs its
+  // parent. Reads from the same diff map the rail consumes. Empty diff
+  // (no changes) falls back to no dim — greying every node would look
+  // like a broken canvas instead of the truthful "nothing changed".
+  const diffHighlightSet = useMemo(() => {
+    if (!resolvedVersionId) return null;
+    const d = diffsByVersionId.get(resolvedVersionId);
+    if (!d || !d.hasParent) return null;
+    return d.highlightSet.size === 0 ? null : d.highlightSet;
+  }, [resolvedVersionId, diffsByVersionId]);
 
   const handleSelectVersion = (versionId: string) => {
     // Newest version → drop the param (URL stays clean for the default view).
@@ -400,41 +337,14 @@ export function GraphViewClient({
     router.replace(qs ? `?${qs}` : `?`, { scroll: false });
   };
 
-  // Three rails side-by-side as TEMPORARY exploratory UI — V1 is the
-  // shipped baseline (right edge); V2 and V3 are alternative designs
-  // stacked to its left for comparison. Pick one before merging.
   const overlay = (
-    <>
-      <GraphHistoryRail
-        versions={versions}
-        selectedVersionId={resolvedVersionId}
-        onSelect={handleSelectVersion}
-      />
-      {diff && parentLabel && (
-        <GraphDiffPanel diff={diff} parentLabel={parentLabel} />
-      )}
-      <GraphHistoryRailV2
-        versions={versions}
-        selectedVersionId={resolvedVersionId}
-        diffsByVersionId={diffsByVersionId}
-        parentLabelByVersionId={parentLabelByVersionId}
-        onSelect={handleSelectVersion}
-      />
-      <GraphHistoryRailV3
-        versions={versions}
-        selectedVersionId={resolvedVersionId}
-        diffsByVersionId={diffsByVersionId}
-        parentLabelByVersionId={parentLabelByVersionId}
-        onSelect={handleSelectVersion}
-      />
-      <GraphHistoryRailV4
-        versions={versions}
-        selectedVersionId={resolvedVersionId}
-        diffsByVersionId={diffsByVersionId}
-        parentLabelByVersionId={parentLabelByVersionId}
-        onSelect={handleSelectVersion}
-      />
-    </>
+    <GraphHistoryRailV4
+      versions={versions}
+      selectedVersionId={resolvedVersionId}
+      diffsByVersionId={diffsByVersionId}
+      parentLabelByVersionId={parentLabelByVersionId}
+      onSelect={handleSelectVersion}
+    />
   );
 
   if (versionNotFound) {
