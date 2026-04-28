@@ -1,4 +1,4 @@
-import type { GHGGraphData, GHGNode } from "@/lib/types";
+import type { GHGGraphData, GHGNode, NodeType } from "@/lib/types";
 
 // Numeric tolerance for emissions comparison — graph builder rounds at
 // multiple stages, and float subtraction within ~1e-6 is just noise.
@@ -18,42 +18,127 @@ function nodeEmissions(node: GHGNode): number {
   return Number.isFinite(v) ? v : 0;
 }
 
+export interface DiffChangedEntry {
+  id: string;
+  name: string;
+  type: NodeType;
+  before: number;
+  after: number;
+  delta: number;
+}
+
+export interface GraphDiff {
+  // Node ids to render at full opacity on the canvas. Includes added +
+  // changed. For v1 (no parent) this is every id in `curr` so nothing
+  // dims.
+  highlightSet: Set<string>;
+  // Whether `prev` was provided. False for v1 — the panel reads this to
+  // skip the "Changes since vN-1" section entirely.
+  hasParent: boolean;
+  added: GHGNode[];
+  changed: DiffChangedEntry[];
+  removed: GHGNode[];
+  totalDelta: number;
+  // Counts per node type, for compact summary rendering.
+  addedByType: Record<NodeType, number>;
+  removedByType: Record<NodeType, number>;
+}
+
+const EMPTY_BY_TYPE: Record<NodeType, number> = {
+  company: 0,
+  facility: 0,
+  emission_source: 0,
+  activity_data: 0,
+  source_document: 0,
+};
+
+function emptyByType(): Record<NodeType, number> {
+  return { ...EMPTY_BY_TYPE };
+}
+
 /**
- * Compute the set of node ids that are "interesting" in `curr` vs `prev`:
- *   - added (id present in curr but not in prev)
- *   - changed (id present in both, but emissions differ beyond EPSILON)
+ * Diff `curr` against `prev`. Single pass over both node lists.
  *
- * Removed nodes are intentionally NOT in the set — they don't exist in
- * `curr` so they can't be highlighted on the current canvas. The user
- * spec says "highlight what changed in this commit"; removals belong to
- * a future text-diff panel.
+ * - `added`: ids in curr not in prev.
+ * - `changed`: same id, emissions differ beyond EPSILON.
+ * - `removed`: ids in prev not in curr (panel-only — can't highlight a
+ *   node that doesn't exist on the current canvas).
  *
- * When `prev` is null (e.g. v1 has no parent), returns the set of all
- * node ids in `curr` so the canvas renders fully colored — no greying.
+ * When `prev` is null, returns an "all highlighted" diff so v1 renders
+ * fully colored with no diff panel content.
  */
-export function computeDiffHighlight(
+export function computeGraphDiff(
   prev: GHGGraphData | null,
   curr: GHGGraphData,
-): Set<string> {
+): GraphDiff {
   if (!prev) {
-    return new Set(curr.nodes.map((n) => n.id));
+    return {
+      highlightSet: new Set(curr.nodes.map((n) => n.id)),
+      hasParent: false,
+      added: [],
+      changed: [],
+      removed: [],
+      totalDelta: 0,
+      addedByType: emptyByType(),
+      removedByType: emptyByType(),
+    };
   }
 
   const prevById = new Map<string, GHGNode>();
   for (const n of prev.nodes) {
     prevById.set(n.id, n);
   }
+  const currIds = new Set<string>(curr.nodes.map((n) => n.id));
 
-  const out = new Set<string>();
+  const highlightSet = new Set<string>();
+  const added: GHGNode[] = [];
+  const changed: DiffChangedEntry[] = [];
+  const addedByType = emptyByType();
+
   for (const n of curr.nodes) {
     const p = prevById.get(n.id);
     if (!p) {
-      out.add(n.id);
+      added.push(n);
+      addedByType[n.type] += 1;
+      highlightSet.add(n.id);
       continue;
     }
-    if (Math.abs(nodeEmissions(n) - nodeEmissions(p)) > EPSILON) {
-      out.add(n.id);
+    const before = nodeEmissions(p);
+    const after = nodeEmissions(n);
+    if (Math.abs(after - before) > EPSILON) {
+      changed.push({
+        id: n.id,
+        name: n.name,
+        type: n.type,
+        before,
+        after,
+        delta: after - before,
+      });
+      highlightSet.add(n.id);
     }
   }
-  return out;
+
+  const removed: GHGNode[] = [];
+  const removedByType = emptyByType();
+  for (const n of prev.nodes) {
+    if (!currIds.has(n.id)) {
+      removed.push(n);
+      removedByType[n.type] += 1;
+    }
+  }
+
+  // Sort changed by absolute delta desc — biggest movers at the top.
+  changed.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+  return {
+    highlightSet,
+    hasParent: true,
+    added,
+    changed,
+    removed,
+    totalDelta: nodeEmissions(curr.nodes.find((n) => n.type === "company") ?? curr.nodes[0]) -
+      nodeEmissions(prev.nodes.find((n) => n.type === "company") ?? prev.nodes[0]),
+    addedByType,
+    removedByType,
+  };
 }

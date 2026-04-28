@@ -13,8 +13,9 @@ import {
   loadGraphVersionJson,
   loadLatestGraphVersionJson,
 } from "@/lib/ghg/graph-versions";
-import { computeDiffHighlight } from "@/lib/diff-graph";
+import { computeGraphDiff } from "@/lib/diff-graph";
 import { GraphHistoryRail } from "@/components/projects/graph-history-rail";
+import { GraphDiffPanel } from "@/components/projects/graph-diff-panel";
 import { Shell, PageHeader } from "@/components/engram/Shell";
 import { Icon } from "@/components/engram/Primitives";
 
@@ -306,14 +307,26 @@ export function GraphViewClient({
   }, [supabase, cache, projectId, parentVersionId, cachedParent]);
 
   // Diff highlight set: nodes added or changed in the current version
-  // vs. its parent. null while parent loads, for v1 (no parent), or
-  // when nothing changed — an empty set would grey EVERY node and look
-  // like a broken canvas instead of the truthful "nothing changed".
-  const diffHighlightSet = useMemo(() => {
+  // vs. its parent. null while parent loads or for v1 (no parent).
+  const diff = useMemo(() => {
     if (!data || !parentVersionId || !parentData) return null;
-    const set = computeDiffHighlight(parentData, data);
-    return set.size === 0 ? null : set;
+    return computeGraphDiff(parentData, data);
   }, [data, parentVersionId, parentData]);
+
+  // Empty diff (no nodes added/changed) falls back to no dimming —
+  // greying every node would look like a broken canvas instead of the
+  // truthful "nothing changed".
+  const diffHighlightSet = useMemo(() => {
+    if (!diff) return null;
+    return diff.highlightSet.size === 0 ? null : diff.highlightSet;
+  }, [diff]);
+
+  // Parent version's display label (e.g. "v1") for the diff panel header.
+  const parentLabel = useMemo(() => {
+    if (!parentVersionId) return null;
+    const p = versions.find((v) => v.id === parentVersionId);
+    return p ? `v${p.version_number}` : null;
+  }, [versions, parentVersionId]);
 
   const handleSelectVersion = (versionId: string) => {
     // Newest version → drop the param (URL stays clean for the default view).
@@ -329,11 +342,16 @@ export function GraphViewClient({
   };
 
   const overlay = (
-    <GraphHistoryRail
-      versions={versions}
-      selectedVersionId={resolvedVersionId}
-      onSelect={handleSelectVersion}
-    />
+    <>
+      <GraphHistoryRail
+        versions={versions}
+        selectedVersionId={resolvedVersionId}
+        onSelect={handleSelectVersion}
+      />
+      {diff && parentLabel && (
+        <GraphDiffPanel diff={diff} parentLabel={parentLabel} />
+      )}
+    </>
   );
 
   if (versionNotFound) {
