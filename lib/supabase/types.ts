@@ -264,21 +264,30 @@ export interface Database {
       };
       graphs: {
         Row: {
+          id: string;
           project_id: string;
           job_id: string;
+          version_number: number;
           graph_json: Json;
+          summary: Json;
           built_at: string;
         };
         Insert: {
+          id?: string;
           project_id: string;
           job_id: string;
+          version_number?: number;
           graph_json: Json;
+          summary: Json;
           built_at?: string;
         };
         Update: {
+          id?: string;
           project_id?: string;
           job_id?: string;
+          version_number?: number;
           graph_json?: Json;
+          summary?: Json;
           built_at?: string;
         };
         Relationships: [];
